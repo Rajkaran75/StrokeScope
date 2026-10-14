@@ -1,0 +1,12 @@
+# build / audit artifacts
+.harness/
+audits/
+.space-build/
+.space-build-cvm/
+.space-build-cloudflare/
+# internal deploy config
+space.json
+deploy-manifest.json
+# OS / editor
+.DS_Store
+Thumbs.db
