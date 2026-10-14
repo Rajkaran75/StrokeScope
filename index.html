@@ -1,0 +1,2264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#111713" />
+  <link rel="icon" href="data:," />
+  <title>Table Tennis Stroke Replay</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
+    :root {
+      color-scheme: light dark;
+      --bg: #eef1eb;
+      --surface: #ffffff;
+      --surface-2: #e3e8df;
+      --ink: #111713;
+      --muted: #4e5d53;
+      --line: #c7d0c7;
+      --accent: #ff5b37;
+      --accent-ink: #2a0902;
+      --signal: #c8f03d;
+      --signal-ink: #172000;
+      --danger: #bf2c20;
+      --video-bg: #101411;
+      --shadow: 0 18px 48px rgba(20, 35, 24, .12);
+      --radius-lg: 26px;
+      --radius-md: 16px;
+      --radius-sm: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b100d;
+        --surface: #151d18;
+        --surface-2: #1e2922;
+        --ink: #f2f6ef;
+        --muted: #a9b6ac;
+        --line: #334038;
+        --accent: #ff6a45;
+        --accent-ink: #210800;
+        --signal: #c8f03d;
+        --signal-ink: #172000;
+        --danger: #ff7c6d;
+        --video-bg: #050806;
+        --shadow: 0 20px 60px rgba(0,0,0,.34);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(90deg, transparent 0 49.8%, color-mix(in srgb, var(--line) 35%, transparent) 50%, transparent 50.2%) top 28px center / 100% 1px no-repeat,
+        var(--bg);
+      color: var(--ink);
+      font-family: "Source Sans 3", ui-sans-serif, sans-serif;
+      font-size: 16px;
+    }
+    button, select, input { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--signal) 72%, transparent);
+      outline-offset: 3px;
+    }
+    .app {
+      width: min(1380px, 100%);
+      margin: 0 auto;
+      padding: max(18px, env(safe-area-inset-top)) clamp(16px, 3vw, 42px) max(30px, env(safe-area-inset-bottom));
+    }
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(270px, .75fr);
+      align-items: end;
+      gap: 28px;
+      margin: 10px 0 24px;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 760px;
+      margin-bottom: 8px;
+      font-family: "Barlow Condensed", ui-sans-serif, sans-serif;
+      font-size: clamp(42px, 6.3vw, 84px);
+      line-height: .92;
+      letter-spacing: -.025em;
+      text-transform: uppercase;
+    }
+    .intro p {
+      max-width: 520px;
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: clamp(16px, 1.7vw, 20px);
+      line-height: 1.45;
+    }
+    .quick-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .step {
+      min-height: 90px;
+      padding: 13px 12px;
+      border-top: 3px solid var(--ink);
+      background: var(--surface-2);
+    }
+    .step b {
+      display: block;
+      margin-bottom: 4px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .step span { color: var(--muted); font-size: 13px; line-height: 1.25; display:block; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(330px, .75fr);
+      gap: clamp(14px, 2vw, 24px);
+      align-items: start;
+    }
+    .stage, .panel {
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .stage { overflow: hidden; border-radius: var(--radius-lg); }
+    .viewer {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      background: var(--video-bg);
+      isolation: isolate;
+    }
+    video, #replayCanvas, #poseCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #camera { transform: scaleX(-1); }
+    #camera.environment { transform: none; }
+    #poseCanvas { z-index: 2; pointer-events: none; object-fit: fill; }
+    #poseCanvas.mirrored { transform: scaleX(-1); }
+    .viewer.tracking #poseCanvas { pointer-events: auto; cursor: crosshair; }
+    .pose-badge {
+      position: absolute; z-index: 5; top: 52px; left: 16px;
+      display: none; align-items: center; gap: 7px;
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(9,14,10,.82); color: #fff;
+      font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      backdrop-filter: blur(6px);
+    }
+    .viewer.live .pose-badge { display: flex; }
+    .pose-badge .pose-dot { width: 7px; height: 7px; border-radius: 50%; background: #8a948c; flex: none; }
+    .pose-badge.locked .pose-dot { background: var(--signal); }
+    .pose-badge.awaiting .pose-dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(255,91,55,.25); }
+    .pose-badge.unavailable .pose-dot { background: var(--danger); }
+    .track-prompt {
+      position: absolute; z-index: 6; left: 50%; top: 16px; transform: translateX(-50%);
+      max-width: min(92%, 520px); padding: 10px 14px; border-radius: 999px;
+      background: var(--accent); color: #fff; font-weight: 800; font-size: 14px;
+      text-align: center; box-shadow: 0 10px 28px rgba(0,0,0,.28);
+    }
+    .track-prompt[hidden] { display: none; }
+    #replayCanvas { display: none; background: var(--video-bg); }
+    .guide {
+      position: absolute;
+      z-index: 3;
+      left: 7%; right: 7%; top: 8%; bottom: 7%;
+      border: 1px dashed rgba(255,255,255,.7);
+      border-radius: 40% 40% 14% 14%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    .viewer.live .guide { opacity: .72; }
+    .guide::after {
+      content: "KEEP PLAYER INSIDE";
+      position: absolute;
+      left: 50%; top: 9px;
+      transform: translateX(-50%);
+      padding: 3px 7px;
+      background: rgba(0,0,0,.55);
+      color: #fff;
+      font: 700 11px/1 "Barlow Condensed", sans-serif;
+      letter-spacing: .08em;
+      white-space: nowrap;
+    }
+    .empty-state {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      color: #f6faf5;
+      text-align: center;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(200,240,61,.12), transparent 34%),
+        repeating-linear-gradient(90deg, transparent 0 79px, rgba(255,255,255,.025) 80px),
+        #101411;
+    }
+    .empty-state[hidden] { display: none; }
+    .empty-state svg { width: 76px; height: 76px; margin-bottom: 10px; color: var(--signal); }
+    .empty-state h2 {
+      margin-bottom: 5px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: clamp(30px, 5vw, 46px);
+      text-transform: uppercase;
+    }
+    .empty-state p { max-width: 430px; margin-bottom: 18px; color: #bac5bd; }
+    .primary, .mark-btn, .secondary, .choice, .icon-btn {
+      border: 0;
+      cursor: pointer;
+      font-weight: 700;
+      transition: filter .15s ease, background .15s ease, color .15s ease;
+    }
+    .primary:hover, .mark-btn:hover, .secondary:hover, .choice:hover, .icon-btn:hover { filter: brightness(.96); }
+    .primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 52px;
+      padding: 0 22px;
+      border-radius: 999px;
+      background: var(--signal);
+      color: var(--signal-ink);
+      font-size: 17px;
+    }
+    .primary svg, .icon-btn svg, .secondary svg { width: 20px; height: 20px; }
+    .live-badge, .replay-badge {
+      position: absolute;
+      z-index: 5;
+      top: 16px;
+      left: 16px;
+      display: none;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(9,14,10,.78);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      backdrop-filter: blur(6px);
+    }
+    .viewer.live .live-badge { display: flex; }
+    .viewer.replay .replay-badge { display: flex; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(255,91,55,.2); }
+    .fps-badge {
+      position: absolute;
+      z-index: 5;
+      top: 16px;
+      right: 16px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(9,14,10,.82);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      font-variant-numeric: tabular-nums;
+      backdrop-filter: blur(6px);
+    }
+    .viewer.live .fps-badge { display: flex; }
+    .fps-badge .fps-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); flex: none; }
+    .fps-badge.low { background: rgba(120,28,18,.92); }
+    .fps-badge.low .fps-dot { background: #ffb09f; }
+    .fps-badge.stepped { box-shadow: inset 0 0 0 1px rgba(200,240,61,.55); }
+    .fps-notice {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin: 0;
+      padding: 11px 16px;
+      border-top: 1px solid var(--line);
+      font-size: 13.5px;
+      line-height: 1.4;
+    }
+    .fps-notice[hidden] { display: none; }
+    .fps-notice strong { white-space: nowrap; }
+    .fps-notice.stepped { background: color-mix(in srgb, var(--signal) 18%, var(--surface)); color: var(--ink); }
+    .fps-notice.lowlight { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--ink); border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .shot-toast {
+      position: absolute;
+      z-index: 6;
+      left: 50%;
+      bottom: 18px;
+      transform: translate(-50%, 16px);
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: var(--signal);
+      color: var(--signal-ink);
+      font-weight: 800;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .shot-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    .stage-controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+    }
+    .control-group { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+    .mark-btn {
+      min-height: 70px;
+      padding: 0 30px;
+      border-radius: 15px;
+      background: var(--accent);
+      color: #fff;
+      font-family: "Barlow Condensed", ui-sans-serif, sans-serif;
+      font-size: 26px;
+      letter-spacing: .025em;
+      box-shadow: inset 0 -3px 0 rgba(70, 9, 0, .18);
+    }
+    .primary:disabled, .mark-btn:disabled, .secondary:disabled, .choice:disabled, .icon-btn:disabled { opacity: .42; cursor: not-allowed; filter: none; }
+    .secondary, .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: var(--radius-sm);
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+    .icon-btn { width: 44px; padding: 0; }
+    .keyhint { color: var(--muted); font-size: 13px; }
+    .keyhint kbd {
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--ink);
+      font: 600 12px/1.4 inherit;
+    }
+
+    .panel {
+      padding: clamp(18px, 2.5vw, 26px);
+      border-radius: var(--radius-lg);
+    }
+    .panel + .panel { margin-top: 14px; }
+    .panel-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+      padding-bottom: 13px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel h2 {
+      margin: 0;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 30px;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .replay-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .choice {
+      min-height: 64px;
+      padding: 10px;
+      border-radius: 13px;
+      background: var(--surface-2);
+      color: var(--ink);
+      text-align: left;
+    }
+    .choice strong { display:block; font-family:"Barlow Condensed",sans-serif; font-size:22px; text-transform:uppercase; }
+    .choice span { display:block; color:var(--muted); font-size:13px; font-weight:500; }
+    .choice.active { background: var(--ink); color: var(--surface); }
+    .choice.active span { color: color-mix(in srgb, var(--surface) 70%, transparent); }
+    .speed-label { display:block; margin:20px 0 8px; color:var(--muted); font-size:13px; font-weight:700; }
+    .speed-row { display:flex; gap:7px; }
+    .speed-btn {
+      flex: 1;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .speed-btn.active { border-color: var(--signal); background: var(--signal); color: var(--signal-ink); }
+    .timeline-wrap { margin-top: 18px; }
+    .timeline-meta { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
+    #timeline { width:100%; min-height:44px; accent-color:var(--accent); touch-action:pan-y; }
+    .play-row { display:flex; gap:8px; margin-top:8px; }
+    .play-row .secondary { flex:1; }
+    .secondary.active { border-color:var(--signal); background:var(--signal); color:var(--signal-ink); }
+    .clip-downloads { margin-top:18px; padding-top:14px; border-top:1px solid var(--line); }
+    .clip-list { display:grid; gap:7px; margin-top:8px; }
+    .clip-empty { margin:0; color:var(--muted); font-size:13px; }
+    .clip-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid color-mix(in srgb, var(--line) 68%, transparent); }
+    .clip-row:last-child { border-bottom:0; }
+    .clip-meta { min-width:0; }
+    .clip-meta strong, .clip-meta span { display:block; }
+    .clip-meta strong { font-size:14px; }
+    .clip-meta span { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .small-btn { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); color:var(--ink); font-weight:700; cursor:pointer; }
+    .small-btn:disabled { opacity:.48; cursor:wait; }
+    .export-copy { margin:0 0 14px; color:var(--muted); font-size:13px; line-height:1.4; }
+    .export-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .export-actions .primary, .export-actions .secondary { width:100%; min-height:46px; padding:0 12px; border-radius:11px; font-size:14px; }
+    .export-status { min-height:18px; margin:10px 0 0; color:var(--muted); font-size:12px; line-height:1.35; }
+    .report-detector { padding:12px 13px; border-radius:13px; background:var(--surface-2); }
+    .report-detector + .report-detector { margin-top:9px; }
+    .report-name { display:block; font-family:"Barlow Condensed",sans-serif; font-size:20px; line-height:1; text-transform:uppercase; }
+    .report-stats { display:block; margin-top:5px; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .report-sub { display:block; margin-top:3px; color:var(--muted); font-size:12.5px; line-height:1.4; font-variant-numeric:tabular-nums; }
+    .report-empty { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }
+
+    .settings-list { display:grid; gap:15px; }
+    .setting { display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center; }
+    .setting strong { display:block; font-size:15px; }
+    .setting small { display:block; color:var(--muted); line-height:1.25; }
+    select {
+      min-height: 40px;
+      padding: 0 30px 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .switch { display:grid; place-items:center; width:48px; height:34px; }
+    .switch input { width:24px; height:24px; margin:0; accent-color:var(--signal); cursor:pointer; }
+    .switch span { display:none; }
+    .meter-setting { display:grid; gap:7px; }
+    .meter-label { display:flex; justify-content:space-between; gap:12px; font-size:14px; }
+    .meter-label span { color:var(--muted); font-variant-numeric:tabular-nums; }
+    .meter {
+      position:relative;
+      height:12px;
+      overflow:hidden;
+      border-radius:999px;
+      background:var(--surface-2);
+      border:1px solid var(--line);
+    }
+    .meter span { display:block; width:0; height:100%; background:var(--signal); transition:width .08s linear; }
+    .meter i { position:absolute; top:-2px; bottom:-2px; left:62%; width:2px; background:var(--accent); }
+    .calibrate-btn {
+      min-height:44px;
+      border:1px solid var(--ink);
+      border-radius:10px;
+      background:transparent;
+      color:var(--ink);
+      font-weight:800;
+      cursor:pointer;
+    }
+    .calibrate-btn:disabled { opacity:.42; cursor:not-allowed; }
+    .calibration-copy { margin:-7px 0 0; color:var(--muted); font-size:12px; line-height:1.35; }
+    .accuracy-note {
+      margin: 18px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .status-line {
+      min-height: 22px;
+      margin: 12px 2px 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status-line.error { color: var(--danger); font-weight: 600; }
+    .session-note {
+      margin: 20px 2px 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .intro { grid-template-columns: 1fr; gap:16px; }
+      .quick-steps { max-width: 560px; }
+      .workspace { grid-template-columns: 1fr; }
+      .side { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+      .panel + .panel { margin-top:0; }
+    }
+    @media (max-width: 620px) {
+      .app { padding-left: 12px; padding-right: 12px; }
+      .intro { margin-top: 4px; }
+      h1 { font-size: clamp(44px, 15vw, 66px); }
+      .quick-steps { gap:5px; }
+      .step { min-height:82px; padding:11px 8px; }
+      .step b { font-size:20px; }
+      .step span { font-size:12px; }
+      .stage, .panel { border-radius: 19px; }
+      .viewer { aspect-ratio: 4 / 3; }
+      .stage-controls { grid-template-columns: 1fr; gap:9px; }
+      .mark-btn { width:100%; }
+      .control-group { justify-content:space-between; }
+      .keyhint { display:none; }
+      .side { grid-template-columns: 1fr; }
+      .panel + .panel { margin-top:0; }
+      .replay-choices { grid-template-columns:1fr 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior:auto !important; transition-duration:0s !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">Mark the shot.<br>Replay the moment.</h1>
+        <p>A courtside replay tool built for noisy training halls. Pose-gated detection now watches the tracked player&rsquo;s arm as the primary judge — sound and motion back it up, and the manual tap always overrides.</p>
+      </div>
+      <div class="quick-steps" aria-label="Quick start">
+        <div class="step"><b>1 · Frame</b><span>Place the phone side-on and fit the player in the guide.</span></div>
+        <div class="step"><b>2 · Track</b><span>Tap Track player, then tap your player on the video. Only that arm can trigger a stroke.</span></div>
+        <div class="step"><b>3 · Replay</b><span>Pose marks clips automatically. Mark by hand anytime — manual is ground truth.</span></div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div>
+        <section class="stage" aria-label="Camera and replay viewer">
+          <div class="viewer" id="viewer">
+            <video id="camera" muted playsinline aria-label="Live training camera"></video>
+            <canvas id="replayCanvas" aria-label="Stroke replay"></canvas>
+            <canvas id="poseCanvas" aria-label="Pose tracking overlay"></canvas>
+            <div class="guide" aria-hidden="true"></div>
+            <div class="live-badge"><span class="dot"></span>Live · buffering</div>
+            <div class="pose-badge" id="poseBadge" role="status" aria-label="Pose tracking status"><span class="pose-dot" aria-hidden="true"></span><span id="poseBadgeText">Pose · off</span></div>
+            <div class="track-prompt" id="trackPrompt" hidden>Tap your player on the video to track them — everyone else will be ignored</div>
+            <div class="fps-badge" id="fpsBadge" role="status" aria-label="Live capture frame rate"><span class="fps-dot" aria-hidden="true"></span><span id="fpsValue">— fps</span><span id="fpsRes" aria-hidden="true">· 720p</span></div>
+            <div class="replay-badge" id="replayBadge">Replay</div>
+            <div class="shot-toast" id="shotToast" role="status">Stroke captured</div>
+            <div class="empty-state" id="emptyState">
+              <div>
+                <svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+                  <path d="M18 31h37l9 10v32H18V31Z" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
+                  <path d="m64 46 18-10v31L64 57V46Z" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
+                  <circle cx="36" cy="49" r="8" fill="currentColor"/>
+                </svg>
+                <h2>Ready courtside</h2>
+                <p>Get the venue and coach’s permission when others may be filmed. Camera and raw-mic analysis stay on this device and clear when the page closes.</p>
+                <button class="primary" id="startCamera">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 10l4.5-2.5v9L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>
+                  Start camera
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="stage-controls">
+            <button class="mark-btn" id="markStroke" disabled>MARK SHOT</button>
+            <div class="control-group">
+              <button class="secondary" id="backLive" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h18M8 7l-5 5 5 5"/></svg>
+                Live view
+              </button>
+              <button class="secondary" id="flagMoment" disabled>Flag moment</button>
+              <button class="icon-btn" id="flipCamera" disabled aria-label="Switch camera">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 7h-5l-2-2H8L6 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2Z"/><path d="m15 11 2 2-2 2M17 13h-5M9 15l-2-2 2-2M7 13h5"/></svg>
+              </button>
+              <span class="keyhint"><kbd>Space</kbd> marks a shot</span>
+            </div>
+          </div>
+          <div class="fps-notice" id="fpsNotice" hidden role="status"></div>
+        </section>
+        <p class="status-line" id="statusLine" role="status">Camera is off.</p>
+      </div>
+
+      <aside class="side">
+        <section class="panel" aria-labelledby="replay-title">
+          <div class="panel-head">
+            <h2 id="replay-title">Replay desk</h2>
+            <span class="count" id="shotCount">0 clips</span>
+          </div>
+          <div class="replay-choices">
+            <button class="choice" id="lastOne" disabled><strong>Last shot</strong><span>Newest clip only</span></button>
+            <button class="choice" id="lastFour" disabled><strong>Last 4</strong><span>Strokes back-to-back</span></button>
+          </div>
+          <span class="speed-label">Playback speed</span>
+          <div class="speed-row" role="group" aria-label="Playback speed">
+            <button class="speed-btn" data-speed="1">1×</button>
+            <button class="speed-btn active" data-speed="0.5">½×</button>
+            <button class="speed-btn" data-speed="0.2">⅕×</button>
+          </div>
+          <div class="timeline-wrap">
+            <div class="timeline-meta"><span id="clipLabel">No replay selected</span><span id="timeLabel">0:00</span></div>
+            <input id="timeline" type="range" min="0" max="100" value="0" disabled aria-label="Replay position" />
+          </div>
+          <div class="play-row">
+            <button class="secondary" id="playPause" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path id="playIcon" d="M8 5v14l11-7z"/></svg>
+              <span id="playText">Play</span>
+            </button>
+            <button class="icon-btn" id="restart" disabled aria-label="Restart replay">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+            <button class="secondary" id="stepBack" disabled aria-label="Step back one frame">‹ 1 frame</button>
+            <button class="secondary" id="stepFwd" disabled aria-label="Step forward one frame">1 frame ›</button>
+            <button class="secondary" id="loopContact" disabled aria-pressed="false">Loop contact</button>
+          </div>
+          <div class="clip-downloads">
+            <span class="speed-label">Marked clips</span>
+            <div class="clip-list" id="clipList"><p class="clip-empty">Mark a shot to create a downloadable clip.</p></div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="capture-title">
+          <div class="panel-head"><h2 id="capture-title">Capture</h2></div>
+          <div class="settings-list">
+            <div class="setting">
+              <div><strong>Pose-gated detection · primary</strong><small>On-device MediaPipe Pose (lite). Wrist-velocity spike + elbow-arc sweep in ~300–500 ms on the tracked arm only. Nothing uploads.</small></div>
+              <label class="switch"><input id="poseDetect" type="checkbox" checked aria-label="Pose-gated stroke detector" /><span aria-hidden="true"></span></label>
+            </div>
+            <button class="calibrate-btn" id="trackPlayer" disabled>Track player — tap to flag</button>
+            <p class="calibration-copy" id="poseStatus">Pose loads on-device when the camera starts. Then tap Track player and tap your player on the video. Other tables&rsquo; players are ignored entirely.</p>
+            <div class="meter-setting">
+              <div class="meter-label"><strong>Tracked-arm signal</strong><span id="poseMeterValue">No pose yet</span></div>
+              <div class="meter" role="meter" aria-label="Tracked arm wrist velocity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="poseMeter"><span id="poseMeterFill"></span></div>
+            </div>
+            <div class="setting">
+              <div><strong>Noisy hall mode</strong><small>Manual marks lead; matched auto hits backfill</small></div>
+              <label class="switch"><input id="noisyHall" type="checkbox" checked aria-label="Noisy hall mode" /><span aria-hidden="true"></span></label>
+            </div>
+            <div class="setting">
+              <div><strong>Player motion</strong><small>Analyzes only the framed player region</small></div>
+              <label class="switch"><input id="motionDetect" type="checkbox" checked aria-label="Player motion detector" /><span aria-hidden="true"></span></label>
+            </div>
+            <div class="setting">
+              <div><strong>Impact sound</strong><small>Raw mic; must coincide within ±150 ms</small></div>
+              <label class="switch"><input id="audioDetect" type="checkbox" checked aria-label="Impact sound detector" /><span aria-hidden="true"></span></label>
+            </div>
+            <div class="meter-setting">
+              <div class="meter-label"><strong>Live hit level</strong><span id="meterValue">Mic off</span></div>
+              <div class="meter" role="meter" aria-label="Live microphone detection level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="meterFill"></span><i id="meterThreshold"></i></div>
+            </div>
+            <div class="setting">
+              <div><strong>Audio source</strong><small>Choose a wired/table-side headset mic</small></div>
+              <select id="audioSource" aria-label="Audio source"><option value="">Default microphone</option></select>
+            </div>
+            <button class="calibrate-btn" id="calibrate" disabled>Calibrate with 5 hits</button>
+            <p class="calibration-copy" id="calibrationCopy">Tap calibrate, then press MARK SHOT along with five clean hits from this table.</p>
+          </div>
+          <p class="accuracy-note"><strong>How judging works now.</strong> <strong>Pose is primary:</strong> a stroke counts when the <em>tracked</em> player&rsquo;s wrist spikes in velocity while the elbow sweeps through an arc inside a ~300–500 ms window — no tap needed, and arms belonging to anyone else never count. <strong>Audio + motion coincidence stays as supporting evidence</strong> (a sound spike alone or motion alone is still ignored there). <strong>Manual Mark is ground truth</strong> and is never removed. Every clip keeps 1.5 seconds before and 0.75 seconds after contact; manual taps snap to the strongest sound spike in the prior 600 ms, falling back to a 350 ms back-date, and all sources dedupe inside 500 ms. Pose runs fully on-device — no video or pose data leaves this phone.</p>
+          <p class="accuracy-note" style="margin-top:10px;"><strong>Auto-follow framing.</strong> Capture starts wide so lateral footwork stays in picture. Once a player is tracked, a smoothed digital crop follows their skeleton and keeps them centered — a deadband ignores small sways so the picture does not jitter, and nobody needs to re-aim the phone. If tracking is lost for over 1.5 seconds, framing falls back to the full frame. The follow state (<em>following</em> / <em>full-frame</em>) is recorded in the session log.</p>
+          <p class="accuracy-note" style="margin-top:10px;"><strong>Frame-rate guard.</strong> Effective fps shows live on the video. If it stays under 24 fps for a few seconds, capture steps down once from 720p to 480p to recover smoothness and notes it on screen. If it is still under 24 fps at 480p, you will see a low-light hint — add light rather than raising resolution.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="report-title">
+          <div class="panel-head">
+            <h2 id="report-title">Detection report</h2>
+            <span class="count" id="reportCount">No taps yet</span>
+          </div>
+          <p class="export-copy">Your manual taps are ground truth. An automatic detection matches a tapped shot when it lands within <strong>±500&nbsp;ms</strong> of the tap&rsquo;s contact time. Detections with no nearby tap are <strong>unmatched</strong> — never &ldquo;false&rdquo;: in a fast rally you won&rsquo;t tap every shot, so an unmatched detection may be a real shot you skipped. Computed on this device; nothing uploads.</p>
+          <div id="reportBody"><p class="report-empty">No manual taps yet this session. Once you tap shots, this report compares them against the pose and audio+motion detectors automatically.</p></div>
+        </section>
+
+        <section class="panel" aria-labelledby="export-title">
+          <div class="panel-head"><h2 id="export-title">Session export</h2></div>
+          <p class="export-copy">Numbers only—no video, no pose frames. Includes settings, detector firings and decisions, pose-gated marks (logged distinctly as <em>pose_marks</em>), manual marks and flags, the auto-follow window state and its <em>follow_events</em> transitions, the full <em>detection_report</em> comparison (per-detector caught / missed / unmatched, with every tap&rsquo;s match status), plus audio and motion telemetry sampled at about 10 Hz.</p>
+          <div class="export-actions">
+            <button class="primary" id="exportSession" disabled>Export session log</button>
+            <button class="secondary" id="copySession" disabled>Copy for chat</button>
+          </div>
+          <p class="export-status" id="exportStatus" role="status">Start the camera to begin a session log.</p>
+        </section>
+      </aside>
+    </section>
+    <p class="session-note"><strong>Before filming:</strong> get the venue and coach’s permission when other players may appear. Video and microphone analysis stay on this device. Up to eight pinned shot clips remain available until this page closes or reloads.</p>
+  </main>
+
+  <canvas id="captureCanvas" hidden></canvas>
+  <canvas id="analysisCanvas" width="96" height="54" hidden></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var els = {
+      viewer: document.getElementById('viewer'), camera: document.getElementById('camera'),
+      replayCanvas: document.getElementById('replayCanvas'), captureCanvas: document.getElementById('captureCanvas'),
+      analysisCanvas: document.getElementById('analysisCanvas'), emptyState: document.getElementById('emptyState'),
+      startCamera: document.getElementById('startCamera'), markStroke: document.getElementById('markStroke'),
+      backLive: document.getElementById('backLive'), flagMoment: document.getElementById('flagMoment'),
+      flipCamera: document.getElementById('flipCamera'), shotToast: document.getElementById('shotToast'),
+      statusLine: document.getElementById('statusLine'),
+      shotCount: document.getElementById('shotCount'), lastOne: document.getElementById('lastOne'),
+      lastFour: document.getElementById('lastFour'), replayBadge: document.getElementById('replayBadge'),
+      clipLabel: document.getElementById('clipLabel'), timeLabel: document.getElementById('timeLabel'),
+      timeline: document.getElementById('timeline'), playPause: document.getElementById('playPause'),
+      playText: document.getElementById('playText'), playIcon: document.getElementById('playIcon'),
+      restart: document.getElementById('restart'), stepBack: document.getElementById('stepBack'),
+      stepFwd: document.getElementById('stepFwd'), loopContact: document.getElementById('loopContact'),
+      noisyHall: document.getElementById('noisyHall'),
+      motionDetect: document.getElementById('motionDetect'), audioDetect: document.getElementById('audioDetect'),
+      audioSource: document.getElementById('audioSource'), calibrate: document.getElementById('calibrate'),
+      calibrationCopy: document.getElementById('calibrationCopy'), meter: document.querySelector('.meter'),
+      meterFill: document.getElementById('meterFill'), meterThreshold: document.getElementById('meterThreshold'),
+      meterValue: document.getElementById('meterValue'), clipList: document.getElementById('clipList'),
+      exportSession: document.getElementById('exportSession'), copySession: document.getElementById('copySession'),
+      exportStatus: document.getElementById('exportStatus'),
+      fpsBadge: document.getElementById('fpsBadge'), fpsValue: document.getElementById('fpsValue'),
+      fpsRes: document.getElementById('fpsRes'), fpsNotice: document.getElementById('fpsNotice'),
+      poseCanvas: document.getElementById('poseCanvas'), poseBadge: document.getElementById('poseBadge'),
+      poseBadgeText: document.getElementById('poseBadgeText'), trackPrompt: document.getElementById('trackPrompt'),
+      poseDetect: document.getElementById('poseDetect'), trackPlayer: document.getElementById('trackPlayer'),
+      poseStatus: document.getElementById('poseStatus'), poseMeter: document.getElementById('poseMeter'),
+      poseMeterFill: document.getElementById('poseMeterFill'), poseMeterValue: document.getElementById('poseMeterValue'),
+      reportCount: document.getElementById('reportCount'), reportBody: document.getElementById('reportBody')
+    };
+
+    var stream = null;
+    var facingMode = 'user';
+    var captureTimer = null;
+    var captureBusy = false;
+    var frameRate = 30;
+    var effectiveFrameRate = 15;
+    var frameIntervalEMA = 0;
+    var lastCaptureTime = 0;
+    var frameRateDropped = false;
+    var rollingFrames = [];
+    var shots = [];
+    var pendingShots = [];
+    var previousPixels = null;
+    var lastMotionAt = 0;
+    var motionArmed = true;
+    var audioArmed = true;
+    var autoCooldownUntil = 0;
+    var motionEvents = [];
+    var audioEvents = [];
+    var audioHistory = [];
+    var audioContext = null;
+    var analyser = null;
+    var audioLoopId = 0;
+    var audioBaseline = 2;
+    var audioThreshold = 22;
+    var audioMultiplier = 6;
+    var lastManualTapAt = 0;
+    var tapTransients = [];
+    var lastTapLoggedAt = 0;
+    var currentAudioLevel = 0;
+    var calibrationRemaining = 0;
+    var calibrationSamples = [];
+    var replayFrames = [];
+    var replaySegments = [];
+    var replayIndex = 0;
+    var replaySpeed = 0.5;
+    var replayPlaying = false;
+    var replayTimer = null;
+    var contactLoop = false;
+    var drawToken = 0;
+    var toastTimer = null;
+    var sessionStartEpoch = null;
+    var sessionStartPerf = 0;
+    var sessionId = '';
+    var sessionEvents = { autoMarks: [], manualEvents: [], telemetry: [], settingsChanges: [], poseMarks: [] };
+    // Pose-gated detection (v2) — primary judge, fully on-device
+    var POSE_WRIST_VEL_SPIKE = 1.7;      // normalized units / second
+    var POSE_ELBOW_SWEEP_DEG = 24;       // degrees inside the window
+    var POSE_WINDOW_MS = 450;            // signature window (~300–500 ms)
+    var POSE_COOLDOWN_MS = 600;
+    var poseInstance = null;
+    var poseReady = false;
+    var poseFailed = false;
+    var poseBusy = false;
+    var poseLoopId = 0;
+    var poseLastSentAt = 0;
+    var poseLandmarks = null;
+    var poseSamples = [];                // {t, wx, wy, elbowDeg, vel}
+    var poseCooldownUntil = 0;
+    var poseFlagMode = false;
+    var trackedAnchor = null;            // {x, y} normalized, in display space
+    var trackedArmSide = 'right';
+    var currentWristVel = 0;
+    var currentElbowSweep = 0;
+    var poseIgnoredCount = 0;
+    var poseLastSeenAt = 0;
+    // Auto-follow framing — smoothed digital crop on the tracked skeleton
+    var FOLLOW_SCALE = 0.82;             // crop width as fraction of full frame (wider than a tight guide crop)
+    var FOLLOW_DEADBAND = 0.07;          // normalized offset ignored before the window moves
+    var FOLLOW_SMOOTH = 0.10;            // per-update lerp toward target
+    var FOLLOW_LOST_MS = 1500;           // no tracked pose this long -> full-frame fallback
+    var followState = 'full-frame';      // 'following' | 'full-frame'
+    var followCenter = { x: 0.5, y: 0.5 };
+    var followScale = 1;
+    var followEvents = [];
+    var currentMotionLevel = 0;
+    var lastTelemetryAt = 0;
+    var shotSequence = 0;
+    // FPS guard
+    var FPS_LOW_THRESHOLD = 24;
+    var FPS_LOW_DURATION_MS = 3000;
+    var FPS_POST_STEP_WAIT_MS = 4000;
+    var fpsLowSince = 0;
+    var fpsSteppedDown = false;
+    var fpsStepAt = 0;
+    var fpsLowLightShown = false;
+    var fpsCaptureTier = 0; // 0 = 720p, 1 = 480p
+    var fpsCaptureMaxWidth = 720;
+    var fpsLastUiUpdate = 0;
+    var fpsGuardBusy = false;
+
+    function setStatus(message, isError) {
+      els.statusLine.textContent = message;
+      els.statusLine.classList.toggle('error', !!isError);
+    }
+
+    function fpsResLabel() { return fpsCaptureTier === 1 ? '480p' : '720p'; }
+
+    function updateFpsBadge(now) {
+      if (!stream) return;
+      if (now && now - fpsLastUiUpdate < 250) return;
+      fpsLastUiUpdate = now || performance.now();
+      var fps = Math.round(effectiveFrameRate * 10) / 10;
+      var display = (fps % 1 === 0 ? String(Math.round(fps)) : fps.toFixed(1)) + ' fps';
+      els.fpsValue.textContent = display;
+      els.fpsRes.textContent = '· ' + fpsResLabel();
+      var isLow = effectiveFrameRate < FPS_LOW_THRESHOLD;
+      els.fpsBadge.classList.toggle('low', isLow);
+      els.fpsBadge.classList.toggle('stepped', fpsSteppedDown);
+      els.fpsBadge.setAttribute('aria-label', 'Live capture frame rate ' + display + ' at ' + fpsResLabel() + (isLow ? ', below 24 fps' : ''));
+    }
+
+    function showFpsNotice(kind, html) {
+      els.fpsNotice.hidden = false;
+      els.fpsNotice.className = 'fps-notice ' + kind;
+      els.fpsNotice.innerHTML = html;
+    }
+
+    function hideFpsNotice() {
+      els.fpsNotice.hidden = true;
+      els.fpsNotice.textContent = '';
+      els.fpsNotice.className = 'fps-notice';
+    }
+
+    function resetFpsGuard() {
+      fpsLowSince = 0;
+      fpsSteppedDown = false;
+      fpsStepAt = 0;
+      fpsLowLightShown = false;
+      fpsCaptureTier = 0;
+      fpsCaptureMaxWidth = 720;
+      fpsGuardBusy = false;
+      fpsLastUiUpdate = 0;
+      els.fpsValue.textContent = '— fps';
+      els.fpsRes.textContent = '· 720p';
+      els.fpsBadge.classList.remove('low', 'stepped');
+      hideFpsNotice();
+    }
+
+    function trackIsAt480p() {
+      try {
+        var track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+        if (!track || !track.getSettings) return false;
+        var s = track.getSettings();
+        var shortEdge = Math.min(s.width || 9999, s.height || 9999);
+        return shortEdge <= 520;
+      } catch (err) { return false; }
+    }
+
+    async function applyStepDownConstraints() {
+      // 1) Try in-place constraint change first — avoids dropping the stream / mic.
+      try {
+        var track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+        if (track && track.applyConstraints) {
+          var isPortrait = (els.camera.videoHeight || 0) > (els.camera.videoWidth || 0);
+          var constraints = isPortrait
+            ? { width: { ideal: 480, max: 480 }, height: { ideal: 854, max: 854 }, frameRate: { ideal: 60 } }
+            : { width: { ideal: 854, max: 854 }, height: { ideal: 480, max: 480 }, frameRate: { ideal: 60 } };
+          await track.applyConstraints(constraints);
+          if (trackIsAt480p()) return true;
+          // Some browsers accept the call but keep the old size — fall through to restart.
+        }
+      } catch (err) {}
+      // 2) Fallback: replace just the video track at 480p, keeping the audio track.
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !stream) return false;
+        var isPortrait2 = (els.camera.videoHeight || 0) > (els.camera.videoWidth || 0);
+        var videoOnly = await navigator.mediaDevices.getUserMedia({
+          video: isPortrait2
+            ? { facingMode: { ideal: facingMode }, width: { ideal: 480, max: 480 }, height: { ideal: 854, max: 854 }, frameRate: { ideal: 60 } }
+            : { facingMode: { ideal: facingMode }, width: { ideal: 854, max: 854 }, height: { ideal: 480, max: 480 }, frameRate: { ideal: 60 } },
+          audio: false
+        });
+        var newTrack = videoOnly.getVideoTracks()[0];
+        if (!newTrack) { videoOnly.getTracks().forEach(function (t) { t.stop(); }); return false; }
+        var oldTracks = stream.getVideoTracks();
+        oldTracks.forEach(function (t) { stream.removeTrack(t); t.stop(); });
+        stream.addTrack(newTrack);
+        els.camera.srcObject = stream;
+        await els.camera.play().catch(function () {});
+        return trackIsAt480p() || !!newTrack;
+      } catch (err) { return false; }
+    }
+
+    async function stepDownResolution(now) {
+      if (fpsSteppedDown || fpsGuardBusy) return;
+      fpsGuardBusy = true;
+      fpsStepAt = now;
+      fpsLowSince = 0;
+      // The stored-frame cap is the part that governs encoding cost in captureFrame;
+      // set it alongside the sensor step so both layers drop together.
+      fpsCaptureMaxWidth = 480;
+      var sensorOk = await applyStepDownConstraints();
+      if (!sensorOk) {
+        // Honest failure path: stored frames are capped at 480, but we could not
+        // confirm the sensor stepped down — say so, and do not proceed to low-light.
+        fpsCaptureTier = 1; // stored tier did step down
+        fpsSteppedDown = true; // once-only: do not retry in a loop
+        updateFpsBadge(0);
+        showFpsNotice('lowlight', '<strong>Step-down limited</strong><span>Frame rate stayed under 24 fps. Stored replay frames were capped to 480p, but this camera did not confirm a 480p sensor step-down. Add light if you can — replay may stay choppy in this light.</span>');
+        logSettings('fps_guard_step_down_stored_only_sensor_unconfirmed');
+        setStatus('FPS guard · stored frames capped to 480p; camera did not confirm sensor step-down.', true);
+        fpsGuardBusy = false;
+        // Mark low-light as already surfaced so checkFpsGuard does not overwrite this notice.
+        fpsLowLightShown = true;
+        return;
+      }
+      fpsSteppedDown = true;
+      fpsCaptureTier = 1;
+      updateFpsBadge(0);
+      showFpsNotice('stepped', '<strong>Resolution stepped down</strong><span>Frame rate stayed under 24 fps, so capture switched from 720p to 480p to recover smoothness. Replay detail is slightly lower, but contact timing will read better.</span>');
+      logSettings('fps_guard_step_down_720p_to_480p');
+      setStatus('FPS guard · stepped down to 480p to recover frame rate (' + (Math.round(effectiveFrameRate * 10) / 10) + ' fps).');
+      fpsGuardBusy = false;
+    }
+
+    function showLowLightHint() {
+      if (fpsLowLightShown) return;
+      fpsLowLightShown = true;
+      showFpsNotice('lowlight', '<strong>Low light — still under 24 fps</strong><span>Even at 480p the frame rate is low. This is usually not enough light: the camera is lengthening each exposure. Add light if you can, move closer to a light source, or keep using manual marks — replay will stay choppier than usual in this light.</span>');
+      logSettings('fps_guard_low_light_hint');
+      setStatus('FPS guard · still under 24 fps at 480p — likely low light. Add light if you can.', true);
+    }
+
+    function checkFpsGuard(now) {
+      if (!stream || sessionStartEpoch === null) return;
+      // Give the camera ~2s to settle after start / after a step before judging.
+      var settleUntil = fpsSteppedDown ? (fpsStepAt + FPS_POST_STEP_WAIT_MS) : (sessionStartPerf + 2000);
+      var isLow = effectiveFrameRate < FPS_LOW_THRESHOLD;
+      updateFpsBadge(now);
+      if (now < settleUntil) { fpsLowSince = 0; return; }
+      if (!isLow) {
+        fpsLowSince = 0;
+        return;
+      }
+      if (!fpsLowSince) { fpsLowSince = now; return; }
+      if (now - fpsLowSince < FPS_LOW_DURATION_MS) return;
+      if (!fpsSteppedDown) {
+        stepDownResolution(now);
+      } else if (!fpsLowLightShown) {
+        showLowLightHint();
+      }
+    }
+
+    function makeSessionId() {
+      if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return 'session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
+    }
+
+    function ensureSession(now) {
+      if (sessionStartEpoch !== null) return;
+      sessionStartEpoch = Date.now();
+      sessionStartPerf = now;
+      sessionId = makeSessionId();
+      lastTelemetryAt = now - 100;
+      els.exportSession.disabled = false;
+      els.copySession.disabled = false;
+      els.exportStatus.textContent = 'Logging detector data locally · nothing exports until you choose it.';
+    }
+
+    function elapsedMs(time) {
+      return sessionStartEpoch === null ? 0 : Math.max(0, Math.round(time - sessionStartPerf));
+    }
+
+    function rounded(value) {
+      return value === null || typeof value === 'undefined' ? null : Math.round(value * 10) / 10;
+    }
+
+    function selectedOptionText(select) {
+      return select.options && select.selectedIndex >= 0 ? select.options[select.selectedIndex].textContent : '';
+    }
+
+    function detectionMode() {
+      if (els.poseDetect.checked && poseReady) return trackedAnchor ? 'pose_gated_primary_audio_motion_support_manual_override' : 'pose_gated_awaiting_player_track_audio_motion_support';
+      if (els.motionDetect.checked && els.audioDetect.checked) return els.noisyHall.checked ? 'audio_motion_coincidence_manual_priority' : 'audio_motion_coincidence';
+      if (els.audioDetect.checked) return 'audio_monitor_manual_marks';
+      if (els.motionDetect.checked) return 'motion_monitor_manual_marks';
+      return 'manual_only';
+    }
+
+    function followWindowState() {
+      return {
+        state: followState === 'following' ? 'following' : 'full-frame',
+        center_x: rounded(followCenter.x),
+        center_y: rounded(followCenter.y),
+        crop_scale: rounded(followScale),
+        target_crop_scale: FOLLOW_SCALE,
+        deadband: FOLLOW_DEADBAND,
+        lost_fallback_ms: FOLLOW_LOST_MS
+      };
+    }
+
+    function currentSettings() {
+      var videoTrack = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+      var audioTrack = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+      var videoSettings = videoTrack && videoTrack.getSettings ? videoTrack.getSettings() : {};
+      return {
+        detection_mode: detectionMode(),
+        sensitivity: {
+          audio_threshold_0_100: rounded(effectiveAudioThreshold()),
+          audio_threshold_multiplier: rounded(audioMultiplier),
+          adaptive_audio_baseline_0_100: rounded(audioBaseline),
+          motion_threshold: rounded(motionThreshold())
+        },
+        microphone: audioTrack ? (audioTrack.label || selectedOptionText(els.audioSource) || 'Default microphone') : (selectedOptionText(els.audioSource) || 'Default microphone'),
+        camera: {
+          label: videoTrack ? (videoTrack.label || 'Camera') : 'Camera unavailable',
+          facing: videoSettings.facingMode || facingMode,
+          width: videoSettings.width || els.camera.videoWidth || null,
+          height: videoSettings.height || els.camera.videoHeight || null,
+          frame_rate: rounded(videoSettings.frameRate || frameRate),
+          frame_rate_effective: rounded(effectiveFrameRate)
+        },
+        noisy_hall: els.noisyHall.checked,
+        audio_detector: els.audioDetect.checked,
+        motion_detector: els.motionDetect.checked,
+        fps_guard: {
+          threshold_fps: FPS_LOW_THRESHOLD,
+          stepped_down: fpsSteppedDown,
+          capture_tier: fpsResLabel(),
+          capture_max_width: fpsCaptureMaxWidth,
+          low_light_hint_shown: fpsLowLightShown
+        },
+        pose_detector: {
+          enabled: els.poseDetect.checked,
+          model: 'MediaPipe Pose lite (on-device, no upload)',
+          ready: poseReady,
+          failed: poseFailed,
+          player_tracked: !!trackedAnchor,
+          anchor: trackedAnchor ? { x: rounded(trackedAnchor.x), y: rounded(trackedAnchor.y) } : null,
+          arm_side: trackedArmSide,
+          wrist_velocity_spike_per_s: POSE_WRIST_VEL_SPIKE,
+          elbow_sweep_deg: POSE_ELBOW_SWEEP_DEG,
+          window_ms: POSE_WINDOW_MS,
+          ignored_other_players: poseIgnoredCount
+        },
+        follow_window: followWindowState()
+      };
+    }
+
+    function logSettings(reason) {
+      if (sessionStartEpoch === null) return;
+      sessionEvents.settingsChanges.push({ t_ms: elapsedMs(performance.now()), reason: reason, settings: currentSettings() });
+    }
+
+    function effectiveAudioThreshold() { return audioBaseline * audioMultiplier; }
+
+    function confidenceScores(audioScore, motionScore) {
+      var audioLimit = effectiveAudioThreshold();
+      var audioConfidence = audioScore === null || typeof audioScore === 'undefined' ? null : Math.max(0, Math.min(1, audioScore / (audioLimit * 2)));
+      var motionConfidence = motionScore === null || typeof motionScore === 'undefined' ? null : Math.max(0, Math.min(1, motionScore / (motionThreshold() * 2)));
+      var coincidenceConfidence = audioConfidence === null || motionConfidence === null ? null : Math.sqrt(audioConfidence * motionConfidence);
+      return [rounded(audioConfidence), rounded(motionConfidence), rounded(coincidenceConfidence)];
+    }
+
+    function logAuto(time, detector, audioScore, motionScore, kept, dedup) {
+      if (sessionStartEpoch === null) return;
+      var confidence = confidenceScores(audioScore, motionScore);
+      sessionEvents.autoMarks.push([
+        elapsedMs(time), detector, rounded(audioScore), rounded(motionScore),
+        confidence[0], confidence[1], confidence[2], kept, dedup
+      ]);
+      renderDetectionReport();
+    }
+
+    // ---------- Pose-gated detection + auto-follow framing ----------
+    function logPose(time, wristVel, elbowSweep, confidence, kept, dedup) {
+      if (sessionStartEpoch === null) return;
+      sessionEvents.poseMarks.push([
+        elapsedMs(time), trackedArmSide, rounded(wristVel), rounded(elbowSweep), POSE_WINDOW_MS,
+        rounded(confidence), kept, dedup, followState === 'following' ? 'following' : 'full-frame'
+      ]);
+      renderDetectionReport();
+    }
+
+    // ---------- Detection report: manual taps (ground truth) vs. automatic detections ----------
+    // A match = an auto detection within ±500 ms of a manual tap's back-dated contact time.
+    // Detections with no nearby tap are "unmatched", never "false" — untapped shots may be real.
+    var MATCH_WINDOW_MS = 500;
+
+    function groundTruthTaps() {
+      return sessionEvents.manualEvents
+        .filter(function (row) { return row[1] === 'manual_mark' && row[3] && typeof row[2] === 'number'; })
+        .map(function (row) { return row[2]; })
+        .sort(function (a, b) { return a - b; });
+    }
+
+    function detectorTimes(kind) {
+      if (kind === 'pose') {
+        return sessionEvents.poseMarks.map(function (row) { return row[0]; }).sort(function (a, b) { return a - b; });
+      }
+      // Audio+motion detector = kept-or-fired coincidence marks only; single-detector
+      // 'detector_only' rows are sub-detector firings, not detections of this detector.
+      return sessionEvents.autoMarks
+        .filter(function (row) { return row[1] === 'coincidence'; })
+        .map(function (row) { return row[0]; })
+        .sort(function (a, b) { return a - b; });
+    }
+
+    function matchDetections(taps, detections) {
+      // Greedy nearest-match: each detection can satisfy at most one tap, and vice versa.
+      var used = {};
+      var tapResults = [];
+      var caught = 0;
+      taps.forEach(function (tap) {
+        var bestIdx = -1;
+        var bestOffset = null;
+        detections.forEach(function (det, i) {
+          if (used[i]) return;
+          var offset = det - tap;
+          if (Math.abs(offset) <= MATCH_WINDOW_MS && (bestOffset === null || Math.abs(offset) < Math.abs(bestOffset))) {
+            bestIdx = i;
+            bestOffset = offset;
+          }
+        });
+        if (bestIdx >= 0) {
+          used[bestIdx] = true;
+          caught += 1;
+          tapResults.push({ contact_t_ms: tap, status: 'caught', matched_detection_t_ms: detections[bestIdx], offset_ms: bestOffset });
+        } else {
+          tapResults.push({ contact_t_ms: tap, status: 'missed', matched_detection_t_ms: null, offset_ms: null });
+        }
+      });
+      var unmatched = [];
+      detections.forEach(function (det, i) { if (!used[i]) unmatched.push(det); });
+      return {
+        detections: detections.length,
+        caught: caught,
+        missed: taps.length - caught,
+        recall_on_tapped_shots: taps.length ? Math.round((caught / taps.length) * 1000) / 1000 : null,
+        taps: tapResults,
+        unmatched_detections_t_ms: unmatched
+      };
+    }
+
+    function computeDetectionReport() {
+      var taps = groundTruthTaps();
+      var pose = matchDetections(taps, detectorTimes('pose'));
+      var audioMotion = matchDetections(taps, detectorTimes('audio_motion'));
+      var caughtByEither = 0;
+      taps.forEach(function (tap, i) {
+        if (pose.taps[i].status === 'caught' || audioMotion.taps[i].status === 'caught') caughtByEither += 1;
+      });
+      return {
+        match_window_ms: MATCH_WINDOW_MS,
+        ground_truth: 'kept manual_mark contact times (back-dated 350 ms or snapped to audio onset)',
+        tapped_shots: taps.length,
+        caught_by_either_detector: caughtByEither,
+        detectors: {
+          pose_gated: pose,
+          audio_motion: audioMotion
+        },
+        terminology: 'An automatic detection with no manual tap within ±500 ms is "unmatched", never a false alarm: untapped shots may be real shots the coach did not tap.'
+      };
+    }
+
+    function fmtClock(ms) {
+      var totalSec = Math.max(0, ms) / 1000;
+      var m = Math.floor(totalSec / 60);
+      var s = totalSec - m * 60;
+      return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+    }
+
+    function fmtTimeList(times) {
+      var shown = times.slice(0, 8).map(fmtClock).join(', ');
+      return times.length > 8 ? shown + ' +' + (times.length - 8) + ' more' : shown;
+    }
+
+    function renderDetectionReport() {
+      if (!els.reportBody) return;
+      var report = computeDetectionReport();
+      els.reportCount.textContent = report.tapped_shots ? report.tapped_shots + (report.tapped_shots === 1 ? ' tapped shot' : ' tapped shots') : 'No taps yet';
+      els.reportBody.innerHTML = '';
+      if (!report.tapped_shots) {
+        var empty = document.createElement('p');
+        empty.className = 'report-empty';
+        empty.textContent = 'No manual taps yet this session. Once you tap shots, this report compares them against the pose and audio+motion detectors automatically.';
+        els.reportBody.appendChild(empty);
+        return;
+      }
+      var groups = [
+        { label: 'Pose-gated', data: report.detectors.pose_gated },
+        { label: 'Audio + motion', data: report.detectors.audio_motion }
+      ];
+      groups.forEach(function (group) {
+        var d = group.data;
+        var box = document.createElement('div');
+        box.className = 'report-detector';
+        var name = document.createElement('span');
+        name.className = 'report-name';
+        name.textContent = group.label;
+        var stats = document.createElement('span');
+        stats.className = 'report-stats';
+        var pct = d.recall_on_tapped_shots === null ? '—' : Math.round(d.recall_on_tapped_shots * 100) + '%';
+        stats.textContent = 'Caught ' + d.caught + ' of ' + report.tapped_shots + ' tapped · ' + pct + ' recall';
+        var sub = document.createElement('span');
+        sub.className = 'report-sub';
+        var missedTimes = d.taps.filter(function (t) { return t.status === 'missed'; }).map(function (t) { return t.contact_t_ms; });
+        var parts = ['Missed ' + d.missed + (missedTimes.length ? ' (' + fmtTimeList(missedTimes) + ')' : '')];
+        parts.push('Unmatched ' + d.unmatched_detections_t_ms.length + (d.unmatched_detections_t_ms.length ? ' (' + fmtTimeList(d.unmatched_detections_t_ms) + ')' : ''));
+        sub.textContent = parts.join(' · ');
+        box.appendChild(name);
+        box.appendChild(stats);
+        box.appendChild(sub);
+        els.reportBody.appendChild(box);
+      });
+      var either = document.createElement('p');
+      either.className = 'report-sub';
+      either.style.marginTop = '10px';
+      either.textContent = 'Either detector caught ' + report.caught_by_either_detector + ' of ' + report.tapped_shots + ' tapped shots. Full per-tap comparison is in the exported session log.';
+      els.reportBody.appendChild(either);
+    }
+
+    function setFollowState(next, now) {
+      if (followState === next) return;
+      followState = next;
+      followEvents.push([elapsedMs(now || performance.now()), next === 'following' ? 'following' : 'full-frame', rounded(followCenter.x), rounded(followCenter.y), rounded(followScale)]);
+      logSettings(next === 'following' ? 'follow_window_following' : 'follow_window_full_frame_fallback');
+    }
+
+    function updateFollow(centroid, now) {
+      // Deadband: ignore small offsets so the picture does not jitter on every sway.
+      var dx = centroid.x - followCenter.x;
+      var dy = centroid.y - followCenter.y;
+      if (Math.abs(dx) > FOLLOW_DEADBAND) followCenter.x += (dx - Math.sign(dx) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH + Math.sign(dx) * FOLLOW_DEADBAND * FOLLOW_SMOOTH;
+      if (Math.abs(dy) > FOLLOW_DEADBAND) followCenter.y += (dy - Math.sign(dy) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH + Math.sign(dy) * FOLLOW_DEADBAND * FOLLOW_SMOOTH;
+      var half = FOLLOW_SCALE / 2;
+      followCenter.x = Math.max(half, Math.min(1 - half, followCenter.x));
+      followCenter.y = Math.max(0.5 - 0, Math.min(1, followCenter.y));
+      followCenter.y = Math.max(FOLLOW_SCALE / 2, Math.min(1 - FOLLOW_SCALE / 2, followCenter.y));
+      followScale += (FOLLOW_SCALE - followScale) * 0.08;
+      setFollowState('following', now);
+      applyFollowTransform();
+    }
+
+    function easeFollowToFullFrame(now) {
+      followCenter.x += (0.5 - followCenter.x) * 0.06;
+      followCenter.y += (0.5 - followCenter.y) * 0.06;
+      followScale += (1 - followScale) * 0.06;
+      if (Math.abs(followScale - 1) < 0.01) { followScale = 1; followCenter.x = 0.5; followCenter.y = 0.5; }
+      setFollowState('full-frame', now);
+      applyFollowTransform();
+    }
+
+    function applyFollowTransform() {
+      // Live preview: pan/zoom the video (and matching pose overlay) to the follow window.
+      var scale = followScale >= 0.99 ? 1 : 1 / followScale;
+      var tx = (0.5 - followCenter.x) * 100; // % of element size before scale compensation is approximate but smooth
+      var ty = (0.5 - followCenter.y) * 100;
+      var mirror = facingMode === 'user' ? -1 : 1;
+      var t = 'scaleX(' + mirror + ') translate(' + (tx * followScale).toFixed(2) + '%, ' + (ty * followScale).toFixed(2) + '%) scale(' + scale.toFixed(3) + ')';
+      els.camera.style.transform = t;
+      els.poseCanvas.style.transform = 'scaleX(' + mirror + ') translate(' + (tx * followScale).toFixed(2) + '%, ' + (ty * followScale).toFixed(2) + '%) scale(' + scale.toFixed(3) + ')';
+    }
+
+    function setPoseBadge(state, text) {
+      els.poseBadge.className = 'pose-badge ' + state;
+      els.poseBadgeText.textContent = text;
+    }
+
+    function updatePoseUi(message) {
+      if (!els.poseDetect.checked) { setPoseBadge('', 'Pose · off'); els.poseStatus.textContent = 'Pose-gated detection is off. Audio + motion coincidence and manual marks still work.'; return; }
+      if (poseFailed) { setPoseBadge('unavailable', 'Pose · unavailable'); els.poseStatus.textContent = 'Pose model could not load on this device/browser — nothing is blocked: audio + motion and manual marks still work exactly as before.'; return; }
+      if (!poseReady) { setPoseBadge('', 'Pose · loading…'); if (message) els.poseStatus.textContent = message; return; }
+      if (poseFlagMode) { setPoseBadge('awaiting', 'Pose · tap your player'); els.poseStatus.textContent = 'Flag mode: tap your player on the video. Only that player will be tracked.'; return; }
+      if (trackedAnchor) { setPoseBadge('locked', 'Pose · tracking'); els.poseStatus.textContent = message || ('Tracking your player (' + trackedArmSide + ' arm). Pose is the primary judge; other players are ignored. Tap Track player to re-flag.'); return; }
+      setPoseBadge('awaiting', 'Pose · needs a player');
+      els.poseStatus.textContent = 'Pose is ready. Tap Track player, then tap your player on the video so the app knows whose arm counts.';
+    }
+
+    function elbowAngleDeg(shoulder, elbow, wrist) {
+      var ax = shoulder.x - elbow.x, ay = shoulder.y - elbow.y;
+      var bx = wrist.x - elbow.x, by = wrist.y - elbow.y;
+      var la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+      if (!la || !lb) return 0;
+      var cos = Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb)));
+      return Math.acos(cos) * 180 / Math.PI;
+    }
+
+    function poseCentroid(lm) {
+      var pts = [lm[11], lm[12], lm[23], lm[24]].filter(Boolean);
+      if (!pts.length) return null;
+      var x = 0, y = 0; pts.forEach(function (p) { x += p.x; y += p.y; });
+      return { x: x / pts.length, y: y / pts.length };
+    }
+
+    function onPoseResults(results) {
+      poseBusy = false;
+      var now = performance.now();
+      var lm = results && results.poseLandmarks ? results.poseLandmarks : null;
+      poseLandmarks = lm;
+      drawPoseOverlay(lm);
+      if (!lm) {
+        if (trackedAnchor && now - poseLastSeenAt > FOLLOW_LOST_MS) easeFollowToFullFrame(now);
+        return;
+      }
+      var centroid = poseCentroid(lm);
+      if (!centroid) return;
+      // Gating: if a player is flagged, only a pose near that anchor counts.
+      if (trackedAnchor) {
+        var dist = Math.hypot(centroid.x - trackedAnchor.x, centroid.y - trackedAnchor.y);
+        if (dist > 0.38) {
+          poseIgnoredCount += 1;
+          els.poseMeterValue.textContent = 'Other player ignored';
+          return; // someone else (e.g. next table) — ignored entirely
+        }
+        // Slowly follow the anchor to the player so long rallies / footwork keep the gate valid.
+        trackedAnchor.x += (centroid.x - trackedAnchor.x) * 0.02;
+        trackedAnchor.y += (centroid.y - trackedAnchor.y) * 0.02;
+      }
+      poseLastSeenAt = now;
+      updateFollow(centroid, now);
+      // Choose arm: higher wrist visibility wins; default right.
+      var rVis = (lm[16] && lm[16].visibility != null) ? lm[16].visibility : 0;
+      var lVis = (lm[15] && lm[15].visibility != null) ? lm[15].visibility : 0;
+      trackedArmSide = lVis > rVis + 0.15 ? 'left' : 'right';
+      var idx = trackedArmSide === 'right' ? { s: 12, e: 14, w: 16 } : { s: 11, e: 13, w: 15 };
+      var shoulder = lm[idx.s], elbow = lm[idx.e], wrist = lm[idx.w];
+      if (!shoulder || !elbow || !wrist) return;
+      var elbowDeg = elbowAngleDeg(shoulder, elbow, wrist);
+      var vel = 0;
+      var prev = poseSamples[poseSamples.length - 1];
+      if (prev) {
+        var dt = Math.max(16, now - prev.t) / 1000;
+        vel = Math.hypot(wrist.x - prev.wx, wrist.y - prev.wy) / dt;
+      }
+      currentWristVel = vel;
+      poseSamples.push({ t: now, wx: wrist.x, wy: wrist.y, elbowDeg: elbowDeg, vel: vel });
+      while (poseSamples.length && poseSamples[0].t < now - 900) poseSamples.shift();
+      // Signature: wrist-velocity spike + elbow-arc sweep inside the window.
+      var windowSamples = poseSamples.filter(function (s) { return now - s.t <= POSE_WINDOW_MS; });
+      var peakVel = 0, peakTime = now, minA = Infinity, maxA = -Infinity;
+      windowSamples.forEach(function (s) { if (s.vel > peakVel) { peakVel = s.vel; peakTime = s.t; } if (s.elbowDeg < minA) minA = s.elbowDeg; if (s.elbowDeg > maxA) maxA = s.elbowDeg; });
+      currentElbowSweep = maxA === -Infinity ? 0 : (maxA - minA);
+      var pct = Math.max(0, Math.min(100, (peakVel / (POSE_WRIST_VEL_SPIKE * 1.6)) * 100));
+      els.poseMeterFill.style.width = pct.toFixed(0) + '%';
+      els.poseMeter.setAttribute('aria-valuenow', String(Math.round(pct)));
+      els.poseMeterValue.textContent = 'Wrist ' + peakVel.toFixed(1) + '/s · elbow sweep ' + Math.round(currentElbowSweep) + '°';
+      var wristConf = wrist.visibility != null ? wrist.visibility : 0.8;
+      if (!trackedAnchor) return; // no flagged player yet — never auto-count
+      if (peakVel >= POSE_WRIST_VEL_SPIKE && currentElbowSweep >= POSE_ELBOW_SWEEP_DEG) {
+        if (now < poseCooldownUntil) { logPose(peakTime, peakVel, currentElbowSweep, wristConf, false, 'rejected_cooldown'); return; }
+        poseCooldownUntil = now + POSE_COOLDOWN_MS;
+        var result = recordShotAt(peakTime, 'pose');
+        logPose(peakTime, peakVel, currentElbowSweep, wristConf, !!(result && result.kept), result ? result.dedup : 'not_recorded');
+        poseSamples = [];
+      }
+    }
+
+    function drawPoseOverlay(lm) {
+      var canvas = els.poseCanvas;
+      var w = els.viewer.clientWidth || 640, h = els.viewer.clientHeight || 360;
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      var ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+      // Tracked anchor marker (display space; canvas itself is mirrored via CSS when needed)
+      if (trackedAnchor) {
+        ctx.beginPath(); ctx.arc(trackedAnchor.x * w, trackedAnchor.y * h, 16, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(200,240,61,.95)'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = 'rgba(200,240,61,.95)'; ctx.font = '700 11px sans-serif';
+        ctx.fillText('TRACKED', trackedAnchor.x * w - 24, trackedAnchor.y * h - 22);
+      }
+      if (!lm) return;
+      var idx = trackedArmSide === 'right' ? { s: 12, e: 14, w: 16 } : { s: 11, e: 13, w: 15 };
+      function line(a, b, color, width) { if (!a || !b) return; ctx.beginPath(); ctx.moveTo(a.x * w, a.y * h); ctx.lineTo(b.x * w, b.y * h); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
+      line(lm[11], lm[12], 'rgba(255,255,255,.45)', 2);
+      line(lm[11], lm[23], 'rgba(255,255,255,.45)', 2); line(lm[12], lm[24], 'rgba(255,255,255,.45)', 2); line(lm[23], lm[24], 'rgba(255,255,255,.45)', 2);
+      line(lm[idx.s], lm[idx.e], '#c8f03d', 5); line(lm[idx.e], lm[idx.w], '#c8f03d', 5);
+      [lm[idx.s], lm[idx.e], lm[idx.w]].forEach(function (p) { if (!p) return; ctx.beginPath(); ctx.arc(p.x * w, p.y * h, 5, 0, Math.PI * 2); ctx.fillStyle = '#ff5b37'; ctx.fill(); });
+    }
+
+    async function initPose() {
+      if (poseReady || poseFailed) { updatePoseUi(); return; }
+      if (typeof window.Pose !== 'function') { poseFailed = true; updatePoseUi(); return; }
+      try {
+        poseInstance = new window.Pose({ locateFile: function (file) { return 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/' + file; } });
+        poseInstance.setOptions({ modelComplexity: 0, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        poseInstance.onResults(onPoseResults);
+        poseReady = true;
+        updatePoseUi('Pose ready on-device. Tap Track player, then tap your player on the video.');
+        logSettings('pose_model_ready');
+      } catch (err) { poseFailed = true; poseInstance = null; updatePoseUi(); }
+    }
+
+    function poseLoopTick() {
+      if (!stream || !poseReady || !poseInstance || !els.poseDetect.checked) return;
+      var now = performance.now();
+      if (!poseBusy && els.camera.readyState >= 2 && now - poseLastSentAt >= 66) {
+        poseBusy = true; poseLastSentAt = now;
+        try {
+          var sent = poseInstance.send({ image: els.camera });
+          if (sent && sent.catch) sent.catch(function () { poseBusy = false; });
+        } catch (err) { poseBusy = false; }
+      }
+      // Tracking-lost fallback check even when no new results arrive
+      if (trackedAnchor && poseLastSeenAt && now - poseLastSeenAt > FOLLOW_LOST_MS && followState === 'following') easeFollowToFullFrame(now);
+      poseLoopId = requestAnimationFrame(poseLoopTick);
+    }
+
+    function startPoseLoop() { cancelAnimationFrame(poseLoopId); if (poseReady && els.poseDetect.checked) poseLoopId = requestAnimationFrame(poseLoopTick); }
+    function stopPoseLoop() { cancelAnimationFrame(poseLoopId); poseLoopId = 0; poseBusy = false; }
+
+    function enterFlagMode() {
+      if (!stream || !poseReady) { updatePoseUi(); return; }
+      poseFlagMode = true;
+      els.viewer.classList.add('tracking');
+      els.trackPrompt.hidden = false;
+      els.trackPlayer.textContent = 'Tap your player on the video…';
+      updatePoseUi();
+      setStatus('Flag mode · tap your player on the video. Everyone else will be ignored.');
+    }
+
+    function exitFlagMode() {
+      poseFlagMode = false;
+      els.viewer.classList.remove('tracking');
+      els.trackPrompt.hidden = true;
+      els.trackPlayer.textContent = trackedAnchor ? 'Re-track player — tap to flag' : 'Track player — tap to flag';
+    }
+
+    function onViewerTap(event) {
+      if (!poseFlagMode) return;
+      var rect = els.viewer.getBoundingClientRect();
+      var rawX = (event.clientX - rect.left) / rect.width;
+      var rawY = (event.clientY - rect.top) / rect.height;
+      // Landmarks live in the (follow-transformed) image space; the tap is in viewer space.
+      // Convert viewer -> image space through the current follow window, then to landmark space.
+      var imgX = followCenter.x + (rawX - 0.5) * followScale;
+      var imgY = followCenter.y + (rawY - 0.5) * followScale;
+      imgX = Math.max(0, Math.min(1, imgX)); imgY = Math.max(0, Math.min(1, imgY));
+      // If a pose is currently visible near the tap, snap to its centroid — that is the person meant.
+      if (poseLandmarks) {
+        var c = poseCentroid(poseLandmarks);
+        if (c && Math.hypot(c.x - imgX, c.y - imgY) <= 0.38) { imgX = c.x; imgY = c.y; }
+      }
+      trackedAnchor = { x: imgX, y: imgY };
+      poseLastSeenAt = performance.now();
+      poseSamples = [];
+      followCenter = { x: imgX, y: imgY };
+      exitFlagMode();
+      updatePoseUi('Tracking your player. Pose marks will fire on that arm only.');
+      logSettings('pose_player_tracked');
+      showToast('Player tracked · pose detection armed');
+      setStatus('Player tracked · pose-gated detection is now the primary judge for that arm.');
+    }
+
+    function maybeSampleTelemetry(now) {
+      if (sessionStartEpoch === null || now - lastTelemetryAt < 100) return;
+      lastTelemetryAt = now;
+      sessionEvents.telemetry.push([elapsedMs(now), rounded(currentAudioLevel), rounded(currentMotionLevel)]);
+    }
+
+    function buildSessionLog() {
+      var duration = sessionStartEpoch === null ? 0 : Math.max(0, Date.now() - sessionStartEpoch);
+      return {
+        schema: 'stroke-replay-session-log/v1.3',
+        session: {
+          id: sessionId,
+          start_time_utc: sessionStartEpoch === null ? null : new Date(sessionStartEpoch).toISOString(),
+          exported_at_utc: new Date().toISOString(),
+          duration_ms: duration,
+          settings_used: currentSettings(),
+          follow_window_state: followState === 'following' ? 'following' : 'full-frame',
+          confidence_method: 'Each detector score is normalized against twice its active threshold (0–1); coincidence confidence is the geometric mean of audio and motion confidence. Pose marks are logged separately in pose_marks: wrist velocity (normalized units/s), elbow sweep (degrees) and window (ms) for the tracked arm only.'
+        },
+        columns: {
+          auto_marks: ['t_ms', 'detector', 'audio_onset_strength', 'motion_magnitude', 'audio_confidence_0_1', 'motion_confidence_0_1', 'coincidence_confidence_0_1', 'kept', 'dedup_result'],
+          pose_marks: ['t_ms', 'arm_side', 'wrist_velocity_per_s', 'elbow_sweep_deg', 'window_ms', 'pose_confidence_0_1', 'kept', 'dedup_result', 'follow_window_state'],
+          manual_events: ['t_ms', 'type', 'contact_t_ms_or_target', 'kept', 'dedup_result', 'contact_method'],
+          telemetry: ['t_ms', 'audio_onset_strength', 'motion_magnitude'],
+          tap_transients: ['t_ms', 'audio_level'],
+          follow_events: ['t_ms', 'state', 'center_x', 'center_y', 'crop_scale']
+        },
+        auto_marks: sessionEvents.autoMarks,
+        pose_marks: sessionEvents.poseMarks,
+        detection_report: computeDetectionReport(),
+        manual_events: sessionEvents.manualEvents,
+        tap_transients: tapTransients,
+        detector_telemetry_approx_10hz: sessionEvents.telemetry,
+        follow_events: followEvents,
+        settings_changes: sessionEvents.settingsChanges
+      };
+    }
+
+    function downloadBlob(blob, filename) {
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    }
+
+    function sessionFilename() {
+      var stamp = sessionStartEpoch === null ? 'no-session' : new Date(sessionStartEpoch).toISOString().replace(/[:.]/g, '-');
+      return 'stroke-session-' + stamp + '.json';
+    }
+
+    function exportSessionLog() {
+      if (sessionStartEpoch === null) return;
+      var text = JSON.stringify(buildSessionLog());
+      downloadBlob(new Blob([text], { type: 'application/json' }), sessionFilename());
+      els.exportStatus.textContent = 'Downloaded ' + Math.max(1, Math.round(text.length / 1024)) + ' KB JSON · numbers only, no video.';
+    }
+
+    async function copySessionLog() {
+      if (sessionStartEpoch === null) return;
+      var text = JSON.stringify(buildSessionLog());
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          var area = document.createElement('textarea');
+          area.value = text;
+          area.setAttribute('readonly', '');
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          if (!document.execCommand('copy')) throw new Error('copy failed');
+          area.remove();
+        }
+        els.exportStatus.textContent = 'Copied ' + Math.max(1, Math.round(text.length / 1024)) + ' KB · ready to paste into chat.';
+      } catch (err) {
+        els.exportStatus.textContent = 'Copy was blocked by this browser. Use Export session log instead.';
+      }
+    }
+
+    function iconPause(paused) {
+      els.playIcon.setAttribute('d', paused ? 'M8 5v14l11-7z' : 'M7 5h4v14H7zm6 0h4v14h-4z');
+      els.playText.textContent = paused ? 'Play' : 'Pause';
+    }
+
+    function motionThreshold() { return 10.5; }
+    function clipTiming() { return { pre: 1500, post: 750, total: 2250 }; }
+
+    function updateThresholdMarker() {
+      els.meterThreshold.style.left = Math.max(4, Math.min(96, effectiveAudioThreshold())) + '%';
+      els.meter.setAttribute('aria-valuenow', String(Math.round(currentAudioLevel)));
+    }
+
+    function setLiveMode() {
+      stopReplay();
+      els.replayCanvas.style.display = 'none';
+      els.camera.style.display = 'block';
+      els.viewer.classList.remove('replay');
+      if (stream) els.viewer.classList.add('live');
+      els.backLive.disabled = true;
+      els.markStroke.disabled = !stream;
+      setStatus(stream ? 'Live · manual marking ready; synchronized auto detection is watching quietly.' : 'Camera is off.');
+    }
+
+    function setReplayMode() {
+      els.camera.style.display = 'none';
+      els.replayCanvas.style.display = 'block';
+      els.viewer.classList.remove('live');
+      els.viewer.classList.add('replay');
+      els.backLive.disabled = false;
+      els.markStroke.disabled = !stream;
+    }
+
+    function stopStream() {
+      if (captureTimer) clearInterval(captureTimer);
+      captureTimer = null;
+      stopPoseLoop();
+      exitFlagMode();
+      var pctx = els.poseCanvas.getContext('2d');
+      if (pctx) pctx.clearRect(0, 0, els.poseCanvas.width, els.poseCanvas.height);
+      if (audioLoopId) cancelAnimationFrame(audioLoopId);
+      audioLoopId = 0;
+      if (audioContext) { audioContext.close().catch(function () {}); audioContext = null; }
+      analyser = null;
+      if (stream) stream.getTracks().forEach(function (track) { track.stop(); });
+      stream = null;
+      els.camera.srcObject = null;
+      els.meterFill.style.width = '0%';
+      els.meterValue.textContent = 'Mic off';
+    }
+
+    function cameraErrorMessage(err) {
+      if (!window.isSecureContext) return 'Camera and raw microphone access need a secure HTTPS page.';
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'This browser does not support camera capture.';
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) return 'Camera or microphone access was blocked. Allow both permissions, then try again.';
+      if (err && err.name === 'NotFoundError') return 'A camera or microphone was not found on this device.';
+      if (err && err.name === 'NotReadableError') return 'The camera or microphone is busy in another app. Close it there, then try again.';
+      return 'Capture could not start. Check camera and microphone permissions, then try again.';
+    }
+
+    function audioConstraints() {
+      var raw = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (els.audioSource.value) raw.deviceId = { exact: els.audioSource.value };
+      return raw;
+    }
+
+    async function populateAudioSources() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      try {
+        var selected = els.audioSource.value;
+        var devices = await navigator.mediaDevices.enumerateDevices();
+        var inputs = devices.filter(function (device) { return device.kind === 'audioinput'; });
+        els.audioSource.innerHTML = '';
+        inputs.forEach(function (device, index) {
+          var option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = device.label || ('Microphone ' + (index + 1));
+          els.audioSource.appendChild(option);
+        });
+        if (!inputs.length) {
+          var fallback = document.createElement('option');
+          fallback.value = '';
+          fallback.textContent = 'Default microphone';
+          els.audioSource.appendChild(fallback);
+        } else if (selected && inputs.some(function (d) { return d.deviceId === selected; })) {
+          els.audioSource.value = selected;
+        }
+      } catch (err) {}
+    }
+
+    async function startCamera() {
+      stopStream();
+      setStatus('Starting camera and raw microphone…');
+      els.startCamera.disabled = true;
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('unsupported');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            // Wider default framing: prefer the widest 16:9 the camera offers so lateral footwork stays in picture.
+            facingMode: { ideal: facingMode }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 },
+            aspectRatio: { ideal: 16 / 9 },
+            frameRate: { ideal: 60, min: 15 }
+          },
+          audio: audioConstraints()
+        });
+        els.camera.srcObject = stream;
+        await els.camera.play();
+        ensureSession(performance.now());
+        await setupAudioAnalysis();
+        await populateAudioSources();
+        els.camera.classList.toggle('environment', facingMode === 'environment');
+        els.emptyState.hidden = true;
+        els.viewer.classList.add('live');
+        els.markStroke.disabled = false;
+        els.flagMoment.disabled = false;
+        els.flipCamera.disabled = false;
+        els.calibrate.disabled = false;
+        els.trackPlayer.disabled = false;
+        // Reset pose + follow state for the new capture
+        poseSamples = []; poseLandmarks = null; poseLastSeenAt = 0; poseIgnoredCount = 0;
+        followState = 'full-frame'; followCenter = { x: 0.5, y: 0.5 }; followScale = 1;
+        followEvents = [[0, 'full-frame', 0.5, 0.5, 1]];
+        els.camera.style.transform = '';
+        applyFollowTransform();
+        updatePoseUi('Pose loading on-device…');
+        initPose().then(function () { startPoseLoop(); updatePoseUi(); });
+        previousPixels = null;
+        rollingFrames = [];
+        pendingShots = [];
+        motionEvents = [];
+        audioEvents = [];
+        tapTransients = [];
+        lastManualTapAt = 0;
+        lastTapLoggedAt = 0;
+        frameIntervalEMA = 0;
+        lastCaptureTime = 0;
+        effectiveFrameRate = 15;
+        frameRateDropped = false;
+        resetFpsGuard();
+        updateFpsBadge(0);
+        captureTimer = setInterval(captureFrame, 33);
+        logSettings('capture_started');
+        setStatus('Live · frame wide, then Track player and tap your player. Pose is the primary judge; calibrate five hits for the audio backup.');
+      } catch (err) {
+        stream = null;
+        els.emptyState.hidden = false;
+        setStatus(cameraErrorMessage(err), true);
+      } finally {
+        els.startCamera.disabled = false;
+      }
+    }
+
+    async function setupAudioAnalysis() {
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) throw new Error('audio unsupported');
+      audioContext = new AudioCtx();
+      if (audioContext.state === 'suspended') await audioContext.resume();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.05;
+      var source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      var data = new Float32Array(analyser.fftSize);
+      function loop() {
+        if (!analyser) return;
+        analyser.getFloatTimeDomainData(data);
+        var peak = 0;
+        var sum = 0;
+        for (var i = 0; i < data.length; i++) {
+          var absolute = Math.abs(data[i]);
+          if (absolute > peak) peak = absolute;
+          sum += data[i] * data[i];
+        }
+        var rms = Math.sqrt(sum / data.length);
+        currentAudioLevel = Math.min(100, Math.max(0, (peak * 115) + (rms * 45)));
+        audioBaseline = (audioBaseline * .985) + (currentAudioLevel * .015);
+        var now = performance.now();
+        audioHistory.push({ time: now, level: currentAudioLevel });
+        while (audioHistory.length && audioHistory[0].time < now - 1200) audioHistory.shift();
+        els.meterFill.style.width = currentAudioLevel.toFixed(1) + '%';
+        els.meterValue.textContent = Math.round(currentAudioLevel) + ' / 100';
+        updateThresholdMarker();
+        updateFpsBadge(now);
+        maybeSampleTelemetry(now);
+        var effT = effectiveAudioThreshold();
+        if (currentAudioLevel >= effT && now - lastManualTapAt <= 250 && lastTapLoggedAt !== lastManualTapAt) {
+          tapTransients.push([elapsedMs(now), rounded(currentAudioLevel)]);
+          lastTapLoggedAt = lastManualTapAt;
+        }
+        if (currentAudioLevel < effT * .55) audioArmed = true;
+        if (els.audioDetect.checked && audioArmed && currentAudioLevel >= effT && (now - lastManualTapAt > 200)) {
+          audioArmed = false;
+          queueAudioEvent(now, currentAudioLevel);
+        }
+        audioLoopId = requestAnimationFrame(loop);
+      }
+      loop();
+    }
+
+    async function flipCamera() {
+      facingMode = facingMode === 'user' ? 'environment' : 'user';
+      await startCamera();
+    }
+
+    function pruneEvents(now) {
+      motionEvents = motionEvents.filter(function (event) { return now - event.time <= 500; });
+      audioEvents = audioEvents.filter(function (event) { return now - event.time <= 500; });
+    }
+
+    function queueAudioEvent(time, level) {
+      setTimeout(function () {
+        if (!stream || !els.audioDetect.checked) return;
+        if (Math.abs(lastManualTapAt - time) <= 200) {
+          var transientTime = elapsedMs(time);
+          var alreadyLogged = tapTransients.some(function (entry) { return Math.abs(entry[0] - transientTime) <= 20; });
+          if (!alreadyLogged) tapTransients.push([transientTime, rounded(level)]);
+          return;
+        }
+        registerAudioEvent(time, level);
+      }, 225);
+    }
+
+    function registerAudioEvent(time, level) {
+      audioEvents.push({ time: time, level: level });
+      logAuto(time, 'audio', level, null, false, 'detector_only');
+      pruneEvents(time);
+      tryCoincidence('audio', time);
+    }
+
+    function registerMotionEvent(time, score) {
+      motionEvents.push({ time: time, score: score });
+      logAuto(time, 'motion', null, score, false, 'detector_only');
+      pruneEvents(time);
+      tryCoincidence('motion', time);
+    }
+
+    function tryCoincidence(kind, time) {
+      if (!els.motionDetect.checked || !els.audioDetect.checked) return;
+      var counterparts = kind === 'audio' ? motionEvents : audioEvents;
+      var match = counterparts.find(function (event) { return Math.abs(event.time - time) <= 150; });
+      if (!match) return;
+      var audioEvent = kind === 'audio' ? audioEvents[audioEvents.length - 1] : match;
+      var motionEvent = kind === 'motion' ? motionEvents[motionEvents.length - 1] : match;
+      var contactTime = Math.round((time + match.time) / 2);
+      if (time < autoCooldownUntil) {
+        logAuto(contactTime, 'coincidence', audioEvent && audioEvent.level, motionEvent && motionEvent.score, false, 'rejected_cooldown');
+        return;
+      }
+      autoCooldownUntil = time + 500;
+      var result = recordShotAt(contactTime, 'auto');
+      logAuto(contactTime, 'coincidence', audioEvent && audioEvent.level, motionEvent && motionEvent.score, !!(result && result.kept), result ? result.dedup : 'not_recorded');
+    }
+
+    function analyzeMotion(now) {
+      if (!els.motionDetect.checked) { currentMotionLevel = 0; return; }
+      var ctx = els.analysisCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(els.camera, 0, 0, 96, 54);
+      var pixels = ctx.getImageData(18, 6, 60, 44).data;
+      if (!previousPixels || previousPixels.length !== pixels.length) {
+        previousPixels = new Uint8ClampedArray(pixels);
+        return;
+      }
+      var total = 0;
+      for (var i = 0; i < pixels.length; i += 16) {
+        var current = (pixels[i] * .299) + (pixels[i + 1] * .587) + (pixels[i + 2] * .114);
+        var previous = (previousPixels[i] * .299) + (previousPixels[i + 1] * .587) + (previousPixels[i + 2] * .114);
+        total += Math.abs(current - previous);
+      }
+      previousPixels.set(pixels);
+      var score = total / (pixels.length / 16);
+      currentMotionLevel = score;
+      var limit = motionThreshold();
+      if (score < limit * .46 && now - lastMotionAt > 240) motionArmed = true;
+      if (score >= limit) {
+        lastMotionAt = now;
+        if (motionArmed) {
+          motionArmed = false;
+          registerMotionEvent(now, score);
+        }
+      }
+    }
+
+    function captureFrame() {
+      if (!stream || captureBusy || els.camera.readyState < 2) return;
+      captureBusy = true;
+      var now = performance.now();
+      if (lastCaptureTime) {
+        frameIntervalEMA = frameIntervalEMA * 0.9 + (now - lastCaptureTime) * 0.1;
+        effectiveFrameRate = Math.max(5, Math.min(60, 1000 / Math.max(1, frameIntervalEMA)));
+      } else {
+        frameIntervalEMA = 33;
+      }
+      lastCaptureTime = now;
+      checkFpsGuard(now);
+      try {
+        analyzeMotion(now);
+        var sourceW = els.camera.videoWidth || 1280;
+        var sourceH = els.camera.videoHeight || 720;
+        var width = Math.min(fpsCaptureMaxWidth, sourceW);
+        var height = Math.round(width * sourceH / sourceW);
+        els.captureCanvas.width = width;
+        els.captureCanvas.height = height;
+        var ctx = els.captureCanvas.getContext('2d');
+        // Auto-follow crop: source rect follows the tracked player; full frame when not following.
+        var cropW = Math.round(sourceW * followScale);
+        var cropH = Math.round(sourceH * followScale);
+        var cxSrc = facingMode === 'user' ? (1 - followCenter.x) : followCenter.x;
+        var sx = Math.max(0, Math.min(sourceW - cropW, Math.round(cxSrc * sourceW - cropW / 2)));
+        var sy = Math.max(0, Math.min(sourceH - cropH, Math.round(followCenter.y * sourceH - cropH / 2)));
+        if (facingMode === 'user') {
+          ctx.save(); ctx.translate(width, 0); ctx.scale(-1, 1);
+          ctx.drawImage(els.camera, sx, sy, cropW, cropH, 0, 0, width, height); ctx.restore();
+        } else {
+          ctx.drawImage(els.camera, sx, sy, cropW, cropH, 0, 0, width, height);
+        }
+        els.captureCanvas.toBlob(function (blob) {
+          if (blob) {
+            var frame = { blob: blob, time: now, width: width, height: height };
+            rollingFrames.push(frame);
+            while (rollingFrames.length && rollingFrames[0].time < now - 3400) rollingFrames.shift();
+            pendingShots.forEach(function (shot) {
+              if (now > shot.contactTime && now <= shot.endTime) shot.frames.push(frame);
+            });
+            finalizeReadyShots(now);
+          }
+          captureBusy = false;
+        }, 'image/jpeg', .78);
+      } catch (err) { captureBusy = false; }
+    }
+
+    function recentShot(contactTime) {
+      var all = pendingShots.concat(shots);
+      for (var i = all.length - 1; i >= 0; i--) {
+        if (Math.abs(all[i].contactTime - contactTime) <= 500) return all[i];
+      }
+      return null;
+    }
+
+    function recordShotAt(contactTime, source) {
+      if (!stream) return { kept: false, dedup: 'capture_inactive' };
+      var duplicate = recentShot(contactTime);
+      if (duplicate) {
+        if (duplicate.source.indexOf(source) === -1) duplicate.source = duplicate.source + ' + ' + source;
+        if (source === 'manual') showToast('Matched existing mark');
+        return { kept: false, dedup: 'rejected_duplicate_500ms', target: duplicate.sequence };
+      }
+      var timing = clipTiming();
+      var preFrames = rollingFrames.filter(function (frame) {
+        return frame.time >= contactTime - timing.pre && frame.time <= contactTime;
+      });
+      shotSequence += 1;
+      pendingShots.push({
+        id: 'shot-' + shotSequence, sequence: shotSequence, source: source, contactTime: contactTime,
+        endTime: contactTime + timing.post, frames: preFrames.slice(), flagged: false
+      });
+      if (source === 'manual') {
+        showToast('Shot marked · corrected to contact');
+        setStatus('Saving 0.75 seconds after contact…');
+      } else if (source === 'pose') {
+        showToast('Pose stroke detected');
+        setStatus('Pose stroke detected · saving 0.75 seconds after contact…');
+      } else if (!els.noisyHall.checked) {
+        showToast('Sound + motion matched');
+      }
+      return { kept: true, dedup: 'kept_unique', target: shotSequence };
+    }
+
+    function markManual() {
+      if (!stream) return;
+      var tapTime = performance.now();
+      lastManualTapAt = tapTime;
+      var contactTime = tapTime - 350;
+      var contactMethod = 'backdate_350ms';
+      var snapThreshold = effectiveAudioThreshold();
+      var bestEntry = null;
+      for (var i = 0; i < audioHistory.length; i++) {
+        var entry = audioHistory[i];
+        if (entry.time <= tapTime && entry.time >= tapTime - 600 && entry.level >= snapThreshold && (!bestEntry || entry.level > bestEntry.level)) bestEntry = entry;
+      }
+      if (bestEntry) { contactTime = bestEntry.time; contactMethod = 'snapped_audio_onset'; }
+      var result = recordShotAt(contactTime, 'manual');
+      sessionEvents.manualEvents.push([
+        elapsedMs(tapTime), 'manual_mark', elapsedMs(contactTime), !!result.kept, result.dedup, contactMethod
+      ]);
+      renderDetectionReport();
+      if (calibrationRemaining > 0) collectCalibrationSample(tapTime);
+    }
+
+    function flagMoment() {
+      if (!stream) return;
+      var now = performance.now();
+      var target = pendingShots.length ? pendingShots[pendingShots.length - 1] : (shots.length ? shots[shots.length - 1] : null);
+      if (target) target.flagged = true;
+      sessionEvents.manualEvents.push([elapsedMs(now), 'flag', target ? target.sequence : null, true, 'not_applicable', 'not_applicable']);
+      updateShotControls();
+      showToast(target ? 'Latest shot flagged' : 'Moment flagged in session log');
+    }
+
+    function collectCalibrationSample(tapTime) {
+      setTimeout(function () {
+        var nearby = audioHistory.filter(function (entry) { return Math.abs(entry.time - tapTime) <= 220; });
+        var sample = nearby.reduce(function (max, entry) { return Math.max(max, entry.level); }, currentAudioLevel);
+        calibrationSamples.push(sample);
+        calibrationRemaining -= 1;
+        if (calibrationRemaining > 0) {
+          els.calibrationCopy.textContent = calibrationRemaining + ' hit' + (calibrationRemaining === 1 ? '' : 's') + ' left · press MARK SHOT along with contact.';
+          els.calibrate.textContent = 'Calibrating · ' + calibrationRemaining + ' left';
+        } else {
+          var ordered = calibrationSamples.slice().sort(function (a, b) { return a - b; });
+          var median = ordered[Math.floor(ordered.length / 2)] || 22;
+          audioMultiplier = Math.max(3, Math.min(8, Math.round((median / Math.max(audioBaseline, 1)) * 10) / 10));
+          els.calibrate.textContent = 'Recalibrate 5 hits';
+          els.calibrationCopy.textContent = 'Calibrated for this table · hits register at ×' + audioMultiplier.toFixed(1) + ' above room level.';
+          updateThresholdMarker();
+          logSettings('five_hit_calibration_completed');
+          setStatus('Calibration complete · sound and motion coincidence is ready.');
+        }
+      }, 230);
+    }
+
+    function startCalibration() {
+      if (!stream) return;
+      calibrationRemaining = 5;
+      calibrationSamples = [];
+      els.calibrate.textContent = 'Calibrating · 5 left';
+      els.calibrationCopy.textContent = 'Press MARK SHOT along with each of the next five clean hits.';
+      setStatus('Calibration started · tap MARK SHOT with each contact.');
+    }
+
+    function finalizeReadyShots(now) {
+      var ready = pendingShots.filter(function (shot) { return now >= shot.endTime; });
+      pendingShots = pendingShots.filter(function (shot) { return now < shot.endTime; });
+      ready.forEach(function (shot) {
+        if (shot.frames.length < 4) return;
+        shots.push(shot);
+        shots.sort(function (a, b) { return a.contactTime - b.contactTime; });
+        while (shots.length > 8) shots.shift();
+        updateShotControls();
+        if (shot.source.indexOf('manual') !== -1 || shot.source.indexOf('pose') !== -1 || !els.noisyHall.checked) showToast('Shot clip pinned');
+        setStatus('Replay ready · captured clips are pinned outside the rolling buffer.');
+      });
+    }
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      els.shotToast.textContent = message;
+      els.shotToast.classList.add('show');
+      toastTimer = setTimeout(function () { els.shotToast.classList.remove('show'); }, 1200);
+    }
+
+    function updateShotControls() {
+      var count = shots.length;
+      els.shotCount.textContent = count + (count === 1 ? ' clip' : ' clips');
+      els.lastOne.disabled = count < 1;
+      els.lastFour.disabled = count < 1;
+      els.clipList.innerHTML = '';
+      if (!count) {
+        var empty = document.createElement('p');
+        empty.className = 'clip-empty';
+        empty.textContent = 'Mark a shot to create a downloadable clip.';
+        els.clipList.appendChild(empty);
+        return;
+      }
+      shots.slice().reverse().forEach(function (shot) {
+        var row = document.createElement('div');
+        row.className = 'clip-row';
+        var meta = document.createElement('div');
+        meta.className = 'clip-meta';
+        var title = document.createElement('strong');
+        title.textContent = 'Shot ' + shot.sequence + (shot.flagged ? ' · flagged' : '');
+        var detail = document.createElement('span');
+        detail.textContent = shot.source + ' · ' + (shot.frames.length / effectiveFrameRate).toFixed(1) + ' s';
+        meta.appendChild(title); meta.appendChild(detail);
+        var button = document.createElement('button');
+        button.className = 'small-btn';
+        button.type = 'button';
+        button.textContent = 'Download video';
+        button.addEventListener('click', function () { downloadShotClip(shot, button); });
+        row.appendChild(meta); row.appendChild(button); els.clipList.appendChild(row);
+      });
+    }
+
+    function delay(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+
+    function recorderFor(streamToRecord) {
+      if (!window.MediaRecorder) return null;
+      var types = ['video/mp4;codecs=h264', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+      for (var i = 0; i < types.length; i++) {
+        try {
+          if (!MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(types[i])) {
+            return { recorder: new MediaRecorder(streamToRecord, { mimeType: types[i], videoBitsPerSecond: 3500000 }), mime: types[i] };
+          }
+        } catch (err) {}
+      }
+      try { return { recorder: new MediaRecorder(streamToRecord), mime: 'video/webm' }; } catch (err) { return null; }
+    }
+
+    async function downloadShotClip(shot, button) {
+      if (!shot || !shot.frames.length || button.disabled) return;
+      var exportCanvas = document.createElement('canvas');
+      exportCanvas.width = shot.frames[0].width;
+      exportCanvas.height = shot.frames[0].height;
+      var ctx = exportCanvas.getContext('2d');
+      if (!exportCanvas.captureStream) {
+        setStatus('This browser cannot turn stored frames into a video file.', true);
+        return;
+      }
+      var videoStream = exportCanvas.captureStream(effectiveFrameRate);
+      var setup = recorderFor(videoStream);
+      if (!setup) {
+        videoStream.getTracks().forEach(function (track) { track.stop(); });
+        setStatus('This browser does not support local clip video export.', true);
+        return;
+      }
+      button.disabled = true;
+      button.textContent = 'Encoding…';
+      setStatus('Encoding shot ' + shot.sequence + ' locally…');
+      var chunks = [];
+      var stopped = new Promise(function (resolve, reject) {
+        setup.recorder.ondataavailable = function (event) { if (event.data && event.data.size) chunks.push(event.data); };
+        setup.recorder.onerror = function () { reject(new Error('recording failed')); };
+        setup.recorder.onstop = resolve;
+      });
+      try {
+        setup.recorder.start(250);
+        for (var i = 0; i < shot.frames.length; i++) {
+          var bitmap = await createImageBitmap(shot.frames[i].blob);
+          ctx.fillStyle = '#050806'; ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+          ctx.drawImage(bitmap, 0, 0, exportCanvas.width, exportCanvas.height);
+          bitmap.close();
+          await delay(Math.round(1000 / effectiveFrameRate));
+        }
+        setup.recorder.stop();
+        await stopped;
+        var actualMime = setup.recorder.mimeType || setup.mime;
+        var extension = actualMime.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+        var blob = new Blob(chunks, { type: actualMime });
+        if (!blob.size) throw new Error('empty video');
+        downloadBlob(blob, 'stroke-shot-' + shot.sequence + '.' + extension);
+        setStatus('Shot ' + shot.sequence + ' downloaded as a short video file.');
+      } catch (err) {
+        try { if (setup.recorder.state !== 'inactive') setup.recorder.stop(); } catch (stopError) {}
+        setStatus('Clip export failed in this browser. The shot is still available for replay.', true);
+      } finally {
+        videoStream.getTracks().forEach(function (track) { track.stop(); });
+        button.disabled = false;
+        button.textContent = 'Download video';
+      }
+    }
+
+    function buildReplay(amount) {
+      if (!shots.length) return;
+      stopReplay();
+      var selected = shots.slice(-Math.min(amount, shots.length));
+      replayFrames = [];
+      replaySegments = [];
+      selected.forEach(function (shot, index) {
+        var start = replayFrames.length;
+        shot.frames.forEach(function (frame) { replayFrames.push(frame); });
+        var segment = { start: start, end: replayFrames.length - 1, position: index + 1, total: selected.length };
+        var contactIdx = start;
+        var bestDiff = Infinity;
+        for (var i = start; i < replayFrames.length; i++) {
+          var diff = Math.abs(replayFrames[i].time - shot.contactTime);
+          if (diff < bestDiff) { bestDiff = diff; contactIdx = i; }
+        }
+        var halfWin = Math.round(0.5 * effectiveFrameRate);
+        segment.contactIdx = contactIdx;
+        segment.loopStart = Math.max(start, contactIdx - halfWin);
+        segment.loopEnd = Math.min(replayFrames.length - 1, contactIdx + halfWin);
+        replaySegments.push(segment);
+      });
+      replayIndex = 0;
+      els.lastOne.classList.toggle('active', amount === 1);
+      els.lastFour.classList.toggle('active', amount !== 1);
+      els.timeline.disabled = false;
+      els.timeline.max = Math.max(0, replayFrames.length - 1);
+      els.timeline.value = 0;
+      els.playPause.disabled = false;
+      els.restart.disabled = false;
+      els.stepBack.disabled = false;
+      els.stepFwd.disabled = false;
+      els.loopContact.disabled = false;
+      setReplayMode();
+      drawReplayFrame();
+      playReplay();
+    }
+
+    function currentSegment() {
+      for (var i = 0; i < replaySegments.length; i++) {
+        if (replayIndex >= replaySegments[i].start && replayIndex <= replaySegments[i].end) return replaySegments[i];
+      }
+      return replaySegments[replaySegments.length - 1];
+    }
+
+    async function drawReplayFrame() {
+      if (!replayFrames.length) return;
+      var token = ++drawToken;
+      var frame = replayFrames[Math.min(replayIndex, replayFrames.length - 1)];
+      try {
+        var bitmap = await createImageBitmap(frame.blob);
+        if (token !== drawToken) { bitmap.close(); return; }
+        var canvas = els.replayCanvas;
+        canvas.width = frame.width; canvas.height = frame.height;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#050806'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+      } catch (err) {}
+      els.timeline.value = replayIndex;
+      var segment = currentSegment();
+      if (segment) {
+        els.replayBadge.textContent = segment.total > 1 ? 'Replay · shot ' + segment.position + ' of ' + segment.total : 'Replay · latest shot';
+        els.clipLabel.textContent = segment.total > 1 ? 'Shot ' + segment.position + ' of ' + segment.total : 'Latest shot';
+      }
+      var seconds = replayIndex / effectiveFrameRate;
+      els.timeLabel.textContent = '0:' + String(Math.floor(seconds)).padStart(2, '0');
+    }
+
+    function playReplay() {
+      if (!replayFrames.length) return;
+      if (replayIndex >= replayFrames.length - 1) replayIndex = 0;
+      replayPlaying = true; iconPause(false); scheduleNextFrame();
+    }
+
+    function scheduleNextFrame() {
+      clearTimeout(replayTimer);
+      if (!replayPlaying) return;
+      drawReplayFrame();
+      replayTimer = setTimeout(function () {
+        var segment = contactLoop ? currentSegment() : null;
+        replayIndex += 1;
+        if (segment && replayIndex > segment.loopEnd) replayIndex = segment.loopStart;
+        if (replayIndex >= replayFrames.length) {
+          replayIndex = replayFrames.length - 1; drawReplayFrame(); replayPlaying = false; iconPause(true); return;
+        }
+        scheduleNextFrame();
+      }, Math.round((1000 / effectiveFrameRate) / replaySpeed));
+    }
+
+    function stopReplay() { replayPlaying = false; clearTimeout(replayTimer); replayTimer = null; iconPause(true); }
+    function toggleReplay() { if (!replayFrames.length) return; if (replayPlaying) stopReplay(); else playReplay(); }
+    function restartReplay() { if (!replayFrames.length) return; replayIndex = 0; drawReplayFrame(); playReplay(); }
+    function stepFrame(direction) {
+      if (!replayFrames.length) return;
+      stopReplay();
+      replayIndex = Math.max(0, Math.min(replayFrames.length - 1, replayIndex + direction));
+      drawReplayFrame();
+    }
+    function toggleContactLoop() {
+      if (!replayFrames.length) return;
+      contactLoop = !contactLoop;
+      els.loopContact.classList.toggle('active', contactLoop);
+      els.loopContact.setAttribute('aria-pressed', String(contactLoop));
+      if (contactLoop) {
+        var segment = currentSegment();
+        if (segment) { replayIndex = segment.loopStart; drawReplayFrame(); }
+      }
+    }
+
+    els.trackPlayer.addEventListener('click', function () { if (poseFlagMode) exitFlagMode(); else enterFlagMode(); updatePoseUi(); });
+    els.poseDetect.addEventListener('change', function () {
+      logSettings('pose_detector_changed');
+      if (els.poseDetect.checked && stream) { initPose().then(function () { startPoseLoop(); updatePoseUi(); }); }
+      else { stopPoseLoop(); exitFlagMode(); trackedAnchor = null; followCenter = { x: 0.5, y: 0.5 }; followScale = 1; setFollowState('full-frame', performance.now()); applyFollowTransform(); updatePoseUi(); }
+    });
+    els.poseCanvas.addEventListener('click', onViewerTap);
+    els.startCamera.addEventListener('click', startCamera);
+    els.flipCamera.addEventListener('click', flipCamera);
+    els.markStroke.addEventListener('click', markManual);
+    els.flagMoment.addEventListener('click', flagMoment);
+    els.backLive.addEventListener('click', setLiveMode);
+    els.lastOne.addEventListener('click', function () { buildReplay(1); });
+    els.lastFour.addEventListener('click', function () { buildReplay(4); });
+    els.playPause.addEventListener('click', toggleReplay);
+    els.restart.addEventListener('click', restartReplay);
+    els.stepBack.addEventListener('click', function () { stepFrame(-1); });
+    els.stepFwd.addEventListener('click', function () { stepFrame(1); });
+    els.loopContact.addEventListener('click', toggleContactLoop);
+    els.calibrate.addEventListener('click', startCalibration);
+    els.exportSession.addEventListener('click', exportSessionLog);
+    els.copySession.addEventListener('click', copySessionLog);
+    els.audioSource.addEventListener('change', function () { logSettings('microphone_changed'); if (stream) startCamera(); });
+    els.motionDetect.addEventListener('change', function () { motionEvents = []; logSettings('motion_detector_changed'); });
+    els.audioDetect.addEventListener('change', function () { audioEvents = []; logSettings('audio_detector_changed'); });
+    els.noisyHall.addEventListener('change', function () { logSettings('detection_mode_changed'); });
+    els.timeline.addEventListener('input', function () { stopReplay(); replayIndex = Number(els.timeline.value); drawReplayFrame(); });
+    document.querySelectorAll('.speed-btn').forEach(function (button) {
+      button.addEventListener('click', function () {
+        replaySpeed = Number(button.dataset.speed);
+        document.querySelectorAll('.speed-btn').forEach(function (item) { item.classList.toggle('active', item === button); });
+        if (replayPlaying) scheduleNextFrame();
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.code === 'Space' && event.target.tagName !== 'INPUT' && event.target.tagName !== 'SELECT' && event.target.tagName !== 'BUTTON') {
+        event.preventDefault(); markManual();
+      }
+      if ((event.code === 'ArrowLeft' || event.code === 'ArrowRight') && replayFrames.length && event.target.tagName !== 'INPUT' && event.target.tagName !== 'SELECT' && event.target.tagName !== 'TEXTAREA' && event.target.tagName !== 'BUTTON') {
+        event.preventDefault();
+        stepFrame(event.code === 'ArrowLeft' ? -1 : 1);
+      }
+    });
+    window.addEventListener('pagehide', stopStream);
+    updateThresholdMarker();
+    renderDetectionReport();
+  }());
+  </script>
+</body>
+</html>
