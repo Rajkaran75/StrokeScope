@@ -724,6 +724,8 @@
 
     var stream = null;
     var facingMode = 'user';
+    var wakeLock = null;
+    var hiddenAtPerf = 0;
     var captureTimer = null;
     var captureBusy = false;
     var frameRate = 30;
@@ -1246,11 +1248,11 @@
       // Deadband: ignore small offsets so the picture does not jitter on every sway.
       var dx = centroid.x - followCenter.x;
       var dy = centroid.y - followCenter.y;
-      if (Math.abs(dx) > FOLLOW_DEADBAND) followCenter.x += (dx - Math.sign(dx) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH + Math.sign(dx) * FOLLOW_DEADBAND * FOLLOW_SMOOTH;
-      if (Math.abs(dy) > FOLLOW_DEADBAND) followCenter.y += (dy - Math.sign(dy) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH + Math.sign(dy) * FOLLOW_DEADBAND * FOLLOW_SMOOTH;
+      // Move only the part of the offset beyond the deadband, so small sways rest at the edge.
+      if (Math.abs(dx) > FOLLOW_DEADBAND) followCenter.x += (dx - Math.sign(dx) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH;
+      if (Math.abs(dy) > FOLLOW_DEADBAND) followCenter.y += (dy - Math.sign(dy) * FOLLOW_DEADBAND) * FOLLOW_SMOOTH;
       var half = FOLLOW_SCALE / 2;
       followCenter.x = Math.max(half, Math.min(1 - half, followCenter.x));
-      followCenter.y = Math.max(0.5 - 0, Math.min(1, followCenter.y));
       followCenter.y = Math.max(FOLLOW_SCALE / 2, Math.min(1 - FOLLOW_SCALE / 2, followCenter.y));
       followScale += (FOLLOW_SCALE - followScale) * 0.08;
       setFollowState('following', now);
@@ -1344,15 +1346,18 @@
       var elbowDeg = elbowAngleDeg(shoulder, elbow, wrist);
       var vel = 0;
       var prev = poseSamples[poseSamples.length - 1];
-      if (prev) {
+      // The tracked arm side can flip between results when both wrists are visible.
+      // Never measure velocity across a side flip — the wrist-to-wrist jump would
+      // fabricate a velocity spike and a phantom stroke.
+      if (prev && prev.side === trackedArmSide) {
         var dt = Math.max(16, now - prev.t) / 1000;
         vel = Math.hypot(wrist.x - prev.wx, wrist.y - prev.wy) / dt;
       }
       currentWristVel = vel;
-      poseSamples.push({ t: now, wx: wrist.x, wy: wrist.y, elbowDeg: elbowDeg, vel: vel });
+      poseSamples.push({ t: now, side: trackedArmSide, wx: wrist.x, wy: wrist.y, elbowDeg: elbowDeg, vel: vel });
       while (poseSamples.length && poseSamples[0].t < now - 900) poseSamples.shift();
-      // Signature: wrist-velocity spike + elbow-arc sweep inside the window.
-      var windowSamples = poseSamples.filter(function (s) { return now - s.t <= POSE_WINDOW_MS; });
+      // Signature: wrist-velocity spike + elbow-arc sweep inside the window, same arm only.
+      var windowSamples = poseSamples.filter(function (s) { return now - s.t <= POSE_WINDOW_MS && s.side === trackedArmSide; });
       var peakVel = 0, peakTime = now, minA = Infinity, maxA = -Infinity;
       windowSamples.forEach(function (s) { if (s.vel > peakVel) { peakVel = s.vel; peakTime = s.t; } if (s.elbowDeg < minA) minA = s.elbowDeg; if (s.elbowDeg > maxA) maxA = s.elbowDeg; });
       currentElbowSweep = maxA === -Infinity ? 0 : (maxA - minA);
@@ -1447,8 +1452,12 @@
       var rawX = (event.clientX - rect.left) / rect.width;
       var rawY = (event.clientY - rect.top) / rect.height;
       // Landmarks live in the (follow-transformed) image space; the tap is in viewer space.
+      // The preview is CSS-mirrored for the user-facing camera but landmarks are not —
+      // un-mirror the tap's x, or "tap your player" flags the mirror-image position and the
+      // 0.38 gate then rejects the real player (or snaps to the wrong one).
+      var viewX = (facingMode === 'user') ? (1 - rawX) : rawX;
       // Convert viewer -> image space through the current follow window, then to landmark space.
-      var imgX = followCenter.x + (rawX - 0.5) * followScale;
+      var imgX = followCenter.x + (viewX - 0.5) * followScale;
       var imgY = followCenter.y + (rawY - 0.5) * followScale;
       imgX = Math.max(0, Math.min(1, imgX)); imgY = Math.max(0, Math.min(1, imgY));
       // If a pose is currently visible near the tap, snap to its centroid — that is the person meant.
@@ -1584,15 +1593,29 @@
       els.markStroke.disabled = !stream;
     }
 
+    // DFMEA #6: an hour of capture in a warm hall must not die to the screen lock.
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try { wakeLock = await navigator.wakeLock.request('screen'); }
+      catch (err) { wakeLock = null; }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock && wakeLock.release) { wakeLock.release().catch(function () {}); }
+      wakeLock = null;
+    }
+
     function stopStream() {
       if (captureTimer) clearInterval(captureTimer);
       captureTimer = null;
       stopPoseLoop();
       exitFlagMode();
+      trackedAnchor = null; // a new capture (or a flipped camera) must re-flag; the old anchor is meaningless
       var pctx = els.poseCanvas.getContext('2d');
       if (pctx) pctx.clearRect(0, 0, els.poseCanvas.width, els.poseCanvas.height);
       if (audioLoopId) cancelAnimationFrame(audioLoopId);
       audioLoopId = 0;
+      releaseWakeLock();
       if (audioContext) { audioContext.close().catch(function () {}); audioContext = null; }
       analyser = null;
       if (stream) stream.getTracks().forEach(function (track) { track.stop(); });
@@ -1641,24 +1664,39 @@
       } catch (err) {}
     }
 
+    async function openCameraStream() {
+      var facing = { ideal: facingMode };
+      var high = {
+        video: {
+          // Wider default framing: prefer the widest 16:9 the camera offers so lateral footwork stays in picture.
+          facingMode: facing, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 },
+          aspectRatio: { ideal: 16 / 9 },
+          frameRate: { ideal: 60, min: 15 }
+        },
+        audio: audioConstraints()
+      };
+      try {
+        return await navigator.mediaDevices.getUserMedia(high);
+      } catch (err) {
+        if (err && err.name === 'OverconstrainedError') {
+          // Older / low-end cameras cannot promise 720p+ — take whatever the camera offers.
+          return await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: audioConstraints() });
+        }
+        throw err;
+      }
+    }
+
     async function startCamera() {
       stopStream();
       setStatus('Starting camera and raw microphone…');
       els.startCamera.disabled = true;
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('unsupported');
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            // Wider default framing: prefer the widest 16:9 the camera offers so lateral footwork stays in picture.
-            facingMode: { ideal: facingMode }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 },
-            aspectRatio: { ideal: 16 / 9 },
-            frameRate: { ideal: 60, min: 15 }
-          },
-          audio: audioConstraints()
-        });
+        stream = await openCameraStream();
         els.camera.srcObject = stream;
         await els.camera.play();
         ensureSession(performance.now());
+        requestWakeLock();
         await setupAudioAnalysis();
         await populateAudioSources();
         els.camera.classList.toggle('environment', facingMode === 'environment');
@@ -1737,7 +1775,7 @@
         maybeSampleTelemetry(now);
         var effT = effectiveAudioThreshold();
         if (currentAudioLevel >= effT && now - lastManualTapAt <= 250 && lastTapLoggedAt !== lastManualTapAt) {
-          tapTransients.push([elapsedMs(now), rounded(currentAudioLevel)]);
+          pushTapTransient([elapsedMs(now), rounded(currentAudioLevel)]);
           lastTapLoggedAt = lastManualTapAt;
         }
         if (currentAudioLevel < effT * .55) audioArmed = true;
@@ -1748,6 +1786,15 @@
         audioLoopId = requestAnimationFrame(loop);
       }
       loop();
+      // On iOS the AudioContext can stay suspended past the tap gesture that started capture —
+      // the analyser then feeds zeros and audio detection goes silently deaf. Say so.
+      var ac = audioContext;
+      setTimeout(function () {
+        if (ac && ac === audioContext && ac.state === 'suspended') {
+          setStatus('Microphone analysis is suspended by the browser — audio detection is deaf. Stop and restart capture from a tap.', true);
+          logSettings('audio_context_suspended_warning');
+        }
+      }, 1500);
     }
 
     async function flipCamera() {
@@ -1766,7 +1813,7 @@
         if (Math.abs(lastManualTapAt - time) <= 200) {
           var transientTime = elapsedMs(time);
           var alreadyLogged = tapTransients.some(function (entry) { return Math.abs(entry[0] - transientTime) <= 20; });
-          if (!alreadyLogged) tapTransients.push([transientTime, rounded(level)]);
+          if (!alreadyLogged) pushTapTransient([transientTime, rounded(level)]);
           return;
         }
         registerAudioEvent(time, level);
@@ -1851,8 +1898,10 @@
         var sourceH = els.camera.videoHeight || 720;
         var width = Math.min(fpsCaptureMaxWidth, sourceW);
         var height = Math.round(width * sourceH / sourceW);
-        els.captureCanvas.width = width;
-        els.captureCanvas.height = height;
+        if (els.captureCanvas.width !== width || els.captureCanvas.height !== height) {
+          els.captureCanvas.width = width;
+          els.captureCanvas.height = height;
+        }
         var ctx = els.captureCanvas.getContext('2d');
         // Auto-follow crop: source rect follows the tracked player; full frame when not following.
         var cropW = Math.round(sourceW * followScale);
@@ -1916,6 +1965,11 @@
         showToast('Sound + motion matched');
       }
       return { kept: true, dedup: 'kept_unique', target: shotSequence };
+    }
+
+    function pushTapTransient(entry) {
+      tapTransients.push(entry);
+      while (tapTransients.length > 400) tapTransients.shift();
     }
 
     function markManual() {
@@ -1984,7 +2038,13 @@
       var ready = pendingShots.filter(function (shot) { return now >= shot.endTime; });
       pendingShots = pendingShots.filter(function (shot) { return now < shot.endTime; });
       ready.forEach(function (shot) {
-        if (shot.frames.length < 4) return;
+        // A marked shot with almost no captured frames (e.g. a stall right at the tap)
+        // used to vanish silently — log it and say so instead.
+        if (shot.frames.length < 4) {
+          sessionEvents.manualEvents.push([elapsedMs(performance.now()), 'shot_dropped_few_frames', elapsedMs(shot.contactTime), false, 'dropped_few_frames', shot.source]);
+          setStatus('Shot ' + shot.sequence + ' (' + shot.source + ') had too few captured frames — no clip was created.', true);
+          return;
+        }
         shots.push(shot);
         shots.sort(function (a, b) { return a.contactTime - b.contactTime; });
         while (shots.length > 8) shots.shift();
@@ -2253,6 +2313,20 @@
       if ((event.code === 'ArrowLeft' || event.code === 'ArrowRight') && replayFrames.length && event.target.tagName !== 'INPUT' && event.target.tagName !== 'SELECT' && event.target.tagName !== 'TEXTAREA' && event.target.tagName !== 'BUTTON') {
         event.preventDefault();
         stepFrame(event.code === 'ArrowLeft' ? -1 : 1);
+      }
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        hiddenAtPerf = performance.now();
+        releaseWakeLock(); // the browser releases it anyway; re-request on return
+      } else {
+        // Frame intervals measured across the hidden gap are meaningless — reset the
+        // fps timing so the guard does not read the gap as a stall and step down spuriously.
+        lastCaptureTime = 0;
+        fpsLowSince = 0;
+        if (stream) requestWakeLock();
+        if (hiddenAtPerf) logSettings('tab_visible_again_after_hidden_ms_' + Math.round(performance.now() - hiddenAtPerf));
+        hiddenAtPerf = 0;
       }
     });
     window.addEventListener('pagehide', stopStream);
