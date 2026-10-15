@@ -2,7 +2,47 @@
 
 All notable changes to the app, newest first. Dates are Pacific.
 
-## Unreleased (planned)
+## Unreleased
+
+### Fixes — static audit 2026-10-15 (in local review, not pushed)
+
+- **Tap-to-track mirrored on the selfie camera.** The preview is CSS-mirrored for
+  the user-facing camera but pose landmarks are not; the tap-to-flag math never
+  un-mirrored, so with the default camera it flagged the mirror-image position
+  and the 0.38 gate then rejected the real player (or snapped to the wrong one).
+  Fixed: tap x is un-mirrored for `facingMode === 'user'`.
+- **Phantom wrist-velocity spikes on arm-side flips.** When both wrists were
+  visible and the tracked side flipped between pose results, velocity was
+  measured wrist-to-wrist across the flip — a ~5/s fabricated spike that could
+  fire a phantom stroke. Velocity is now measured against the previous sample
+  of the same arm only, and the 450 ms sweep window is same-arm only.
+- **Stale tracked player across camera restart/flip.** `trackedAnchor` survived
+  `stopStream`, so a flipped or restarted camera kept gating on the old view.
+  Now cleared; the coach re-flags.
+- **Follow deadband did not deadband.** The "move only past the deadband" math
+  added the deadband portion back in (`+ sign·db·smooth`), reducing it to an
+  on/off gate; the window chased into the deadband instead of resting at its
+  edge. Now only the beyond-deadband portion moves. Also removed a dead
+  y-clamp line that was immediately overwritten.
+- **Marked shots could vanish silently.** A pending shot with fewer than 4
+  captured frames was dropped in `finalizeReadyShots` with no log. Now logged
+  to `manual_events` as `shot_dropped_few_frames` with an on-screen warning.
+- **Wake lock (DFMEA #6).** The DFMEA prescribed it; it was never implemented.
+  Screen wake lock is now requested on capture start, released on stop, and
+  re-requested when the tab becomes visible again.
+- **Camera fallback.** `min: 1280` width made `getUserMedia` throw
+  `OverconstrainedError` on low-end devices — no camera at all. Now falls back
+  to unconstrained video on that error.
+- **Silent mic deafness.** If the AudioContext stays suspended past the start
+  tap (iOS), the analyser feeds zeros and audio detection goes deaf with the
+  meter sitting at 0. Now surfaces an explicit warning after 1.5 s.
+- **Tab-hidden fps false positive.** Frame intervals across a hidden gap read
+  as a stall and could trip the fps guard into a spurious step-down. Timing
+  resets on return to visible; hidden duration is logged to settings changes.
+- Minor: `tapTransients` capped at 400 entries; capture canvas is no longer
+  reallocated every frame.
+
+### Planned
 
 - Security review pass: SRI-pin the MediaPipe CDN script, evaluate self-hosting
   the pose model files and the Google Fonts, confirm nothing phones home.
