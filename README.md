@@ -31,4 +31,17 @@ design FMEA for the detection pipeline (12 failure modes, RPN-ordered).
 ## Privacy
 
 No backend, no uploads, no analytics. The pose model and all detection run
-locally; covering the camera provably stops all processing.
+locally; covering the camera provably stops all processing. Note: the pose
+model file itself loads from the jsDelivr CDN at startup (see the planned
+security review in `CHANGELOG.md`).
+
+## Known limitations
+
+- Pose tracking needs the player flagged first (*Track player*, then tap them);
+  it works best with the rear camera, side-on to the table.
+- Detection is assistive: manual marks are the ground truth, and the detection
+  report calls unmatched auto-detections "unmatched", never false alarms.
+- In low light the fps guard steps capture 720p → 480p to protect timing; add
+  light when you can.
+- Long sessions grow the exported log (~10 Hz telemetry) — exports stay a few
+  MB for a typical session.
